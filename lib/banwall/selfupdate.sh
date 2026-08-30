@@ -52,12 +52,14 @@ _su_dateien() {
 		-type f 2>/dev/null | sort)
 }
 
-# _su_fetch URL ZIEL - denselben Härtungsflags wie beim Blocklist-Download.
+# _su_fetch URL ZIEL [TIMEOUT] - dieselben Härtungsflags wie beim
+# Blocklist-Download. Der Assistent gibt einen kürzeren Timeout mit: dort
+# wartet jemand vor dem Bildschirm auf den Start.
 _su_fetch() {
-	local url="$1" ziel="$2"
+	local url="$1" ziel="$2" timeout="${3:-$_BANWALL_SU_TIMEOUT}"
 	curl --fail --silent --show-error --location \
 		--proto '=https' --tlsv1.2 \
-		--max-time "$_BANWALL_SU_TIMEOUT" \
+		--max-time "$timeout" \
 		--max-filesize "$_BANWALL_SU_MAX_BYTES" \
 		--user-agent "banwall/$BANWALL_VERSION" \
 		--output "$ziel" "$url"
@@ -155,6 +157,29 @@ _su_installieren() {
 		bash "$quelle/install.sh" install "$flag"
 }
 
+# _su_vorbereiten ARBEITSVERZEICHNIS [TIMEOUT]
+# Holt den Stand, packt ihn aus und prüft ihn. Danach liegt der geprüfte
+# Baum in ARBEITSVERZEICHNIS/neu. Eigene Funktion, weil der Assistent
+# dieselbe Vorarbeit braucht - er fragt beim Start nach einer neueren
+# Fassung, bevor er die ersten Fragen stellt.
+_su_vorbereiten() {
+	local arbeit="$1" timeout="${2:-$_BANWALL_SU_TIMEOUT}"
+
+	_su_fetch "$BANWALL_UPDATE_URL" "$arbeit/banwall.tar.gz" "$timeout" || {
+		log_error "Quelle nicht erreichbar: $BANWALL_UPDATE_URL"
+		return 1
+	}
+
+	mkdir -p "$arbeit/neu"
+	# --strip-components=1: GitHub packt alles unter 'banwall-main/'.
+	tar -xzf "$arbeit/banwall.tar.gz" -C "$arbeit/neu" --strip-components=1 2>/dev/null || {
+		log_error "Der geholte Stand ließ sich nicht auspacken."
+		return 1
+	}
+
+	_su_pruefe_baum "$arbeit/neu"
+}
+
 banwall_selfupdate_run() {
 	# Kein starres require_root: gebraucht wird Schreibrecht auf die
 	# Installation. Bei den Standardpfaden ist das root, bei
@@ -181,15 +206,8 @@ banwall_selfupdate_run() {
 	trap "rm -rf '$arbeit'" RETURN
 
 	log_step "Hole den aktuellen Stand von $BANWALL_UPDATE_URL"
-	_su_fetch "$BANWALL_UPDATE_URL" "$arbeit/banwall.tar.gz" ||
-		die 1 "Quelle nicht erreichbar. Die Installation bleibt unverändert."
-
-	mkdir -p "$arbeit/neu"
-	# --strip-components=1: GitHub packt alles unter 'banwall-main/'.
-	tar -xzf "$arbeit/banwall.tar.gz" -C "$arbeit/neu" --strip-components=1 2>/dev/null ||
-		die 1 "Der geholte Stand ließ sich nicht auspacken."
-
-	_su_pruefe_baum "$arbeit/neu" || die 1 "Der geholte Stand wurde verworfen."
+	_su_vorbereiten "$arbeit" ||
+		die 1 "Der geholte Stand wurde verworfen. Die Installation bleibt unverändert."
 
 	local neue_version geaendert=()
 	neue_version="$(_su_version "$arbeit/neu")"
@@ -200,7 +218,11 @@ banwall_selfupdate_run() {
 		return 0
 	fi
 
-	log_info "Neuer Stand: Version $neue_version (installiert: $BANWALL_VERSION)"
+	if [[ "$neue_version" == "$BANWALL_VERSION" ]]; then
+		log_info "Neuer Stand bei gleicher Versionsnummer ($BANWALL_VERSION)."
+	else
+		log_info "Neuer Stand: Version $neue_version (installiert: $BANWALL_VERSION)"
+	fi
 	log_info "${#geaendert[@]} Datei(en) ändern sich:"
 	local rel
 	for rel in "${geaendert[@]}"; do

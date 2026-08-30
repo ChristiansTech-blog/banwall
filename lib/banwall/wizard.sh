@@ -831,6 +831,88 @@ _wiz_vorgaben() {
 	WIZ_ADMIN_KEY=""
 }
 
+# _wiz_neustart - den Assistenten mit der frisch eingebauten Fassung neu
+# starten. Eigene Funktion, damit sie sich im Test ersetzen lässt: ein
+# exec würde dort den Testlauf übernehmen.
+_wiz_neustart() {
+	exec "$(_su_prefix)/bin/banwall" -c "$BANWALL_CONFIG_FILE" setup
+}
+
+# _wiz_update - noch vor der Begrüßung: läuft hier eine veraltete Fassung?
+# Der Assistent schreibt die Konfiguration, und welche Fragen er stellt,
+# hängt von seiner eigenen Version ab. Wer eine alte Fassung durchklickt,
+# bekommt am Ende eine Datei ohne die neuen Schalter - deshalb steht die
+# Frage am Anfang und nicht in der Zusammenfassung.
+_wiz_update() {
+	# Im Git-Checkout ist 'git pull' der Weg; ohne Schreibrecht auf die
+	# Installation oder ohne Werkzeug wäre die Frage sinnlos.
+	[[ -z "${BANWALL_CHECKOUT_DIR:-}" ]] || return 0
+	[[ -w "$BANWALL_LIB_DIR" ]] || return 0
+	command -v curl >/dev/null 2>&1 || return 0
+	command -v tar >/dev/null 2>&1 || return 0
+
+	printf '\n'
+	_wiz_neutral "suche nach einer neueren Fassung ..."
+
+	local arbeit
+	arbeit="$(mktemp -d)"
+	# Kurzer Timeout: hier wartet jemand auf den Start des Assistenten.
+	# Schlägt die Prüfung fehl, ist das kein Grund, die Einrichtung
+	# aufzuhalten - sie hat mit dem Update nichts zu tun.
+	if ! _su_vorbereiten "$arbeit" 15 2>/dev/null; then
+		_wiz_neutral "keine Verbindung zur Update-Quelle - weiter mit Version $BANWALL_VERSION"
+		rm -rf "$arbeit"
+		return 0
+	fi
+
+	local geaendert=() neue_version
+	mapfile -t geaendert < <(_su_geaendert "$arbeit/neu")
+	neue_version="$(_su_version "$arbeit/neu")"
+
+	if ((${#geaendert[@]} == 0)); then
+		_wiz_gut "Banwall $BANWALL_VERSION ist aktuell"
+		rm -rf "$arbeit"
+		return 0
+	fi
+
+	# Die Nummer steigt mit jedem Push, aber wer zwischen zwei Ständen
+	# derselben Version zieht, bekommt sonst die Auskunft, eine Nummer
+	# sei neuer als sie selbst.
+	if [[ "$neue_version" == "$BANWALL_VERSION" ]]; then
+		_wiz_neutral "neuer Stand verfügbar: ${#geaendert[@]} geänderte Datei(en), Version bleibt $BANWALL_VERSION"
+	else
+		_wiz_neutral "neuere Fassung verfügbar: $neue_version (installiert: $BANWALL_VERSION, ${#geaendert[@]} Datei(en))"
+	fi
+
+	if is_dry_run; then
+		_wiz_neutral "[dry-run] es wird nichts eingebaut"
+		rm -rf "$arbeit"
+		return 0
+	fi
+
+	local jetzt
+	_wiz_jn jetzt 1 "Vor der Einrichtung aktualisieren?"
+	if ((jetzt == 0)); then
+		rm -rf "$arbeit"
+		return 0
+	fi
+
+	local sicherung
+	sicherung="$(_su_sichern "$arbeit/neu")"
+	if ! _su_installieren "$arbeit/neu"; then
+		_wiz_fehler "Einbau fehlgeschlagen - der Assistent läuft mit Version $BANWALL_VERSION weiter."
+		_wiz_neutral "bisheriger Stand: $sicherung"
+		rm -rf "$arbeit"
+		return 0
+	fi
+	rm -rf "$arbeit"
+
+	# Der Assistent hat sich gerade selbst ausgetauscht. Weiterlaufen
+	# hieße, die alte Fassung aus dem Speicher zu benutzen.
+	_wiz_gut "Banwall $neue_version installiert - der Assistent startet neu"
+	_wiz_neustart
+}
+
 _wiz_willkommen() {
 	clear 2>/dev/null || true
 	printf '\n  %sBanwall %s%s %s· Ersteinrichtung%s\n' \
@@ -919,6 +1001,7 @@ banwall_wizard_run() {
 
 	_wiz_breite
 	_wiz_vorgaben
+	_wiz_update
 	_wiz_willkommen
 	_wiz_systemcheck
 	_wiz_weiter

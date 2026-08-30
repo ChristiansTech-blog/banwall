@@ -7,7 +7,7 @@
 
 set -Eeuo pipefail
 
-BANWALL_VERSION="0.1.0"
+BANWALL_VERSION="0.2.0"
 
 # Wurzel der Bibliothek: im Repository das lib/banwall/ neben diesem
 # Skript, im installierten Zustand $PREFIX/lib/banwall. So läuft dasselbe

@@ -9,6 +9,10 @@ load helper
 setup() {
 	setup_banwall
 	load_module selfupdate
+	load_module ssh
+	load_module adminuser
+	load_module wizard
+	_wiz_breite
 
 	# Eine vollständige "installierte" Fassung aufbauen ...
 	PREFIX="$BATS_TEST_TMPDIR/usr/local"
@@ -171,4 +175,98 @@ version_setzen() {
 	run banwall_selfupdate_run
 	[ "$status" -eq 0 ]
 	[ "$(cat "$BANWALL_CONFIG_FILE")" = 'BANWALL_TCP_PORTS="22 443"' ]
+}
+
+# --- Update-Prüfung beim Start des Assistenten ---------------------------
+
+# Der Neustart würde per exec den Testlauf übernehmen - hier nur merken,
+# dass er gekommen wäre.
+neustart_abfangen() {
+	_wiz_neustart() { printf 'NEUSTART\n'; }
+}
+
+@test "der Assistent meldet einen aktuellen Stand und läuft weiter" {
+	neustart_abfangen
+	tarball_bauen
+	run _wiz_update
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"ist aktuell"* ]]
+	[[ "$output" != *"NEUSTART"* ]]
+}
+
+@test "der Assistent bietet eine neuere Fassung an und startet danach neu" {
+	neustart_abfangen
+	_wiz_jn() { printf -v "$1" '1'; }
+	version_setzen "9.9.9"
+	tarball_bauen
+	run _wiz_update
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"9.9.9"* ]]
+	[[ "$output" == *"NEUSTART"* ]]
+	grep -q 'BANWALL_VERSION="9.9.9"' "$PREFIX/bin/banwall"
+}
+
+@test "wer im Assistenten ablehnt, richtet mit der alten Fassung ein" {
+	neustart_abfangen
+	# _wiz_jn liest von /dev/tty, das es im Testlauf nicht gibt - hier
+	# steht die Antwort "nein" an seiner Stelle.
+	_wiz_jn() { printf -v "$1" '0'; }
+	version_setzen "9.9.9"
+	tarball_bauen
+	run _wiz_update
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"NEUSTART"* ]]
+	! grep -q 'BANWALL_VERSION="9.9.9"' "$PREFIX/bin/banwall"
+}
+
+@test "eine nicht erreichbare Quelle hält den Assistenten nicht auf" {
+	neustart_abfangen
+	export STUB_CURL_RC=1
+	run _wiz_update
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"keine Verbindung"* ]]
+}
+
+@test "ein kaputter Stand hält den Assistenten nicht auf" {
+	neustart_abfangen
+	printf '\nif then fi\n' >>"$QUELLE/lib/banwall/common.sh"
+	version_setzen "9.9.9"
+	tarball_bauen
+	run _wiz_update
+	[ "$status" -eq 0 ]
+	[[ "$output" != *"NEUSTART"* ]]
+	! grep -q "if then fi" "$PREFIX/lib/banwall/common.sh"
+}
+
+@test "im Git-Checkout prüft der Assistent gar nicht erst" {
+	neustart_abfangen
+	export BANWALL_CHECKOUT_DIR="$REPO_ROOT"
+	tarball_bauen
+	run _wiz_update
+	[ "$status" -eq 0 ]
+	[ -z "$output" ]
+}
+
+@test "im Trockenlauf baut der Assistent nichts ein" {
+	neustart_abfangen
+	version_setzen "9.9.9"
+	tarball_bauen
+	BANWALL_DRY_RUN=1 run _wiz_update
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"dry-run"* ]]
+	! grep -q 'BANWALL_VERSION="9.9.9"' "$PREFIX/bin/banwall"
+}
+
+@test "ein neuer Stand bei gleicher Versionsnummer wird verständlich gemeldet" {
+	neustart_abfangen
+	_wiz_jn() { printf -v "$1" '0'; }
+	# Gleiche Nummer auf beiden Seiten - im Test trägt die Installation
+	# die Kennung "test" aus helper.bash.
+	version_setzen "$BANWALL_VERSION"
+	printf '\n# neuer Kommentar\n' >>"$QUELLE/lib/banwall/nftables.sh"
+	tarball_bauen
+	run _wiz_update
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"neuer Stand verfügbar"* ]]
+	[[ "$output" != *"neuere Fassung"* ]]
 }

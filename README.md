@@ -218,7 +218,15 @@ sudo banwall apply --dry-run
 sudo banwall apply
 ```
 
-Automatisch läuft das nie, und es gibt bewusst keinen Timer dafür. Ein
+Der Assistent fragt von sich aus: `banwall setup` prüft vor der ersten
+Frage, ob ein neuer Stand vorliegt, und bietet an, ihn einzubauen — danach
+startet er mit der neuen Fassung neu. Der Grund ist praktisch: welche Fragen
+der Assistent stellt, hängt von seiner eigenen Version ab. Ist die Quelle
+nicht erreichbar, geht es ohne Umschweife mit der installierten Fassung
+weiter.
+
+Automatisch installiert wird trotzdem nichts, und es gibt bewusst keinen
+Timer dafür. Ein
 Werkzeug, das Firewall und SSH-Zugang verwaltet, soll sich nicht in dem
 Moment selbst austauschen, in dem niemand hinsieht.
 
