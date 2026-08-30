@@ -2,10 +2,14 @@
 #
 # wizard.sh - geführte Ersteinrichtung.
 #
-# Der Assistent schreibt ausschließlich /etc/banwall/banwall.conf. Er
-# verändert das System nicht - das tut erst 'banwall apply'. Diese
-# Trennung ist Absicht: Wer sich durch die Fragen klickt, soll danach
-# noch einen Trockenlauf ansehen können, bevor irgendetwas passiert.
+# Der Assistent schreibt /etc/banwall/banwall.conf und sonst nichts -
+# umgesetzt wird sie erst von 'banwall apply'. Diese Trennung ist
+# Absicht: Wer sich durch die Fragen klickt, soll danach noch einen
+# Trockenlauf ansehen können, bevor irgendetwas passiert.
+#
+# Eine Ausnahme gibt es: den Admin-Benutzer. Fehlt ein Konto mit
+# sudo-Rechten und Key, legt _wiz_schritt_adminuser es sofort an -
+# begründet im Kopf von adminuser.sh.
 #
 # Jeder Schritt ist eine eigene Funktion, weil die Zusammenfassung am
 # Ende zurück in einzelne Schritte springen können muss.
@@ -14,6 +18,10 @@
 _BANWALL_WIZARD_LOADED=1
 
 # ---------------------------------------------------------------- Layout
+#
+# Schlank halten: eine Akzentfarbe, dünne Trennlinien, keine Rahmen.
+# Ein Schritt soll auf ein 80x24-Terminal passen, ohne dass die Frage
+# nach oben herausscrollt.
 
 _WIZ_BREITE=76
 
@@ -26,23 +34,30 @@ _wiz_breite() {
 }
 
 # Linien werden mit sed gefüllt, nicht mit tr: tr arbeitet byteweise,
-# und die Rahmenzeichen sind 3-Byte-UTF-8. Mit tr entsteht Zeichensalat.
+# und das Linienzeichen ist 3-Byte-UTF-8. Mit tr entsteht Zeichensalat.
 _wiz_linie() {
-	local zeichen="${1:-─}"
-	printf '%*s\n' "$_WIZ_BREITE" '' | sed "s/ /$zeichen/g"
+	printf '  %s' "$_C_DIM"
+	printf '%*s' "$_WIZ_BREITE" '' | sed 's/ /─/g'
+	printf '%s\n' "$_C_RST"
 }
 
-# _wiz_titel NUMMER GESAMT TEXT
+# _wiz_titel TEXT [NUMMER GESAMT]
+# Mit Schrittnummer steht rechts eine Fortschrittsanzeige - so ist ohne
+# Nachzählen sichtbar, wie viel noch kommt.
 _wiz_titel() {
-	printf '\n%s' "$_C_BLU"
-	_wiz_linie '━'
-	if [[ -n "${3:-}" ]]; then
-		printf '  Schritt %s von %s   %s\n' "$1" "$2" "$3"
-	else
-		printf '  %s\n' "$1"
+	local text="$1" nr="${2:-}" gesamt="${3:-}"
+	printf '\n  %s%s%s' "$_C_BOLD" "$text" "$_C_RST"
+	if [[ -n "$nr" ]]; then
+		local punkte="" i fuell
+		for ((i = 1; i <= gesamt; i++)); do
+			((i <= nr)) && punkte+='●' || punkte+='○'
+		done
+		fuell=$((_WIZ_BREITE - ${#text} - gesamt))
+		((fuell < 1)) && fuell=1
+		printf '%*s%s%s%s' "$fuell" '' "$_C_BLU" "$punkte" "$_C_RST"
 	fi
-	_wiz_linie '━'
-	printf '%s\n' "$_C_RST"
+	printf '\n'
+	_wiz_linie
 }
 
 # _wiz_absatz TEXT...
@@ -53,38 +68,47 @@ _wiz_absatz() {
 	printf '%s\n' "$*" | fold -s -w "$_WIZ_BREITE" | sed 's/^/  /'
 }
 
-# _wiz_kasten FARBE MARKE TEXT...
-_wiz_kasten() {
+# _wiz_notiz FARBE MARKE TEXT...
+# Randleiste statt Kasten: hebt den Text ab, ohne die Ausgabe zuzubauen.
+_wiz_notiz() {
 	local farbe="$1" marke="$2"
 	shift 2
-	printf '\n%s  ┌─ %s\n' "$farbe" "$marke"
-	printf '%s\n' "$*" | fold -s -w $((_WIZ_BREITE - 4)) | sed "s/^/  │ /"
-	printf '  └%s%s\n\n' \
-		"$(printf '%*s' $((_WIZ_BREITE - 2)) '' | sed 's/ /─/g')" "$_C_RST"
+	printf '\n  %s│ %s%s%s\n' "$farbe" "$_C_BOLD" "$marke" "$_C_RST"
+	printf '%s\n' "$*" | fold -s -w $((_WIZ_BREITE - 4)) |
+		sed "s/^/  ${farbe}│${_C_RST} /"
 }
 
-_wiz_hinweis() { _wiz_kasten "$_C_BLU" "Hinweis" "$@"; }
-_wiz_warnung() { _wiz_kasten "$_C_YEL" "Achtung" "$@"; }
-_wiz_gefahr() { _wiz_kasten "$_C_RED" "Gefahr" "$@"; }
+_wiz_hinweis() { _wiz_notiz "$_C_BLU" "Hinweis" "$@"; }
+_wiz_warnung() { _wiz_notiz "$_C_YEL" "Achtung" "$@"; }
+_wiz_gefahr() { _wiz_notiz "$_C_RED" "Gefahr" "$@"; }
 _wiz_gut() { printf '  %s✓%s %s\n' "$_C_GRN" "$_C_RST" "$*"; }
 _wiz_schlecht() { printf '  %s✗%s %s\n' "$_C_RED" "$_C_RST" "$*"; }
 _wiz_neutral() { printf '  %s·%s %s\n' "$_C_DIM" "$_C_RST" "$*"; }
+_wiz_fehler() { printf '  %s✗ %s%s\n' "$_C_RED" "$*" "$_C_RST"; }
 
 # --------------------------------------------------------------- Eingabe
 #
 # Alle Eingaben kommen von /dev/tty, nicht von stdin. Sonst funktioniert
 # der Assistent nicht mehr, sobald install.sh selbst aus einer Pipe
 # gelesen wird.
+#
+# Einheitliche Eingabezeile: '› [Vorgabe]'. Enter übernimmt die Vorgabe.
+
+# _wiz_prompt VORGABE
+_wiz_prompt() {
+	if [[ -n "$1" ]]; then
+		printf '  %s›%s %s[%s]%s ' "$_C_BLU" "$_C_RST" "$_C_DIM" "$1" "$_C_RST"
+	else
+		printf '  %s›%s ' "$_C_BLU" "$_C_RST"
+	fi
+}
 
 # _wiz_frage VARIABLE VORGABE FRAGE
 _wiz_frage() {
 	local var="$1" vorgabe="$2" frage="$3" eingabe
-	printf '\n  %s\n' "$frage"
-	if [[ -n "$vorgabe" ]]; then
-		printf '  [%s]: ' "$vorgabe"
-	else
-		printf '  [leer]: '
-	fi
+	printf '\n'
+	_wiz_absatz "$frage"
+	_wiz_prompt "$vorgabe"
 	read -r eingabe </dev/tty || eingabe=""
 	printf -v "$var" '%s' "${eingabe:-$vorgabe}"
 }
@@ -92,15 +116,17 @@ _wiz_frage() {
 # _wiz_jn VARIABLE VORGABE(0|1) FRAGE
 _wiz_jn() {
 	local var="$1" vorgabe="$2" frage="$3" eingabe hinweis
-	if [[ "$vorgabe" == "1" ]]; then hinweis="[J/n]"; else hinweis="[j/N]"; fi
+	if [[ "$vorgabe" == "1" ]]; then hinweis="J/n"; else hinweis="j/N"; fi
+	printf '\n'
+	_wiz_absatz "$frage"
 	while true; do
-		printf '\n  %s %s: ' "$frage" "$hinweis"
+		_wiz_prompt "$hinweis"
 		read -r eingabe </dev/tty || eingabe=""
 		case "${eingabe,,}" in
 		"") printf -v "$var" '%s' "$vorgabe"; return 0 ;;
 		j | ja | y | yes) printf -v "$var" '1'; return 0 ;;
 		n | nein | no) printf -v "$var" '0'; return 0 ;;
-		*) printf '  %sBitte j oder n eingeben.%s\n' "$_C_YEL" "$_C_RST" ;;
+		*) _wiz_fehler "Bitte j oder n." ;;
 		esac
 	done
 }
@@ -112,27 +138,29 @@ _wiz_auswahl() {
 	local -a optionen=("$@")
 	local i eingabe
 
-	printf '\n  %s\n\n' "$frage"
+	printf '\n'
+	_wiz_absatz "$frage"
+	printf '\n'
 	for i in "${!optionen[@]}"; do
-		printf '    %s)  %s\n' "$((i + 1))" "${optionen[$i]%%|*}"
+		printf '    %s%s%s  %s\n' "$_C_BLU" "$((i + 1))" "$_C_RST" "${optionen[$i]%%|*}"
 	done
+	printf '\n'
 
 	while true; do
-		printf '\n  Auswahl [%s]: ' "$vorgabe"
+		_wiz_prompt "$vorgabe"
 		read -r eingabe </dev/tty || eingabe=""
 		eingabe="${eingabe:-$vorgabe}"
 		if [[ "$eingabe" =~ ^[0-9]+$ ]] && ((eingabe >= 1 && eingabe <= ${#optionen[@]})); then
 			printf -v "$var" '%s' "${optionen[$((eingabe - 1))]#*|}"
 			return 0
 		fi
-		printf '  %sBitte eine Zahl zwischen 1 und %s eingeben.%s\n' \
-			"$_C_YEL" "${#optionen[@]}" "$_C_RST"
+		_wiz_fehler "Bitte eine Zahl von 1 bis ${#optionen[@]}."
 	done
 }
 
 # _wiz_weiter - Pause, damit ein Hinweis nicht weggescrollt wird.
 _wiz_weiter() {
-	printf '\n  %s[Enter] zum Fortfahren%s' "$_C_DIM" "$_C_RST"
+	printf '\n  %s[Enter] weiter%s' "$_C_DIM" "$_C_RST"
 	read -r </dev/tty || true
 	printf '\n'
 }
@@ -198,7 +226,7 @@ _wiz_key_lage() {
 }
 
 _wiz_systemcheck() {
-	_wiz_titel "Systemprüfung" "" ""
+	_wiz_titel "Systemprüfung"
 
 	local id="unbekannt" version=""
 	if [[ -r /etc/os-release ]]; then
@@ -250,7 +278,7 @@ _wiz_systemcheck() {
 	fi
 
 	# Offene Ports
-	printf '\n  Aktuell erreichbare Dienste:\n'
+	printf '\n  %sLauschende Dienste%s\n' "$_C_BOLD" "$_C_RST"
 	local port dienst leer=1
 	while read -r port dienst; do
 		[[ -n "$port" ]] || continue
@@ -262,37 +290,112 @@ _wiz_systemcheck() {
 		leer=0
 		printf '    %-7s udp   %s\n' "$port" "$dienst"
 	done < <(_wiz_lauschende_ports u)
-	((leer)) && printf '    (keine gefunden - ist "ss" installiert?)\n'
+	((leer)) && printf '    keine gefunden - ist "ss" installiert?\n'
 
 	if ((WIZ_KEYS_OK == 0)); then
-		# Ohne sudo-Benutzer ist WIZ_SUDO_USER leer - dann muss im Beispiel
-		# ein sichtbarer Platzhalter stehen und kein blankes "@10.0.0.5".
-		local wer host
-		wer="${WIZ_SUDO_USER%% *}"
-		host="$(hostname -I 2>/dev/null | awk '{print $1}')"
-		_wiz_gefahr "Ohne hinterlegten SSH-Key kann Banwall den Passwort-Login nicht abschalten - das würde dich aussperren. Der Assistent lässt Passwort-Logins in diesem Fall an und weist später erneut darauf hin.
-
-So legst du einen Schlüssel an - in einem ZWEITEN Terminal auf deinem Arbeitsplatz, diese Sitzung offen lassen:
-
-  ssh-keygen -t ed25519            # falls noch kein Schlüssel da ist
-  ssh-copy-id ${wer:-<benutzer>}@${host:-<server>}
-
-Danach diesen Assistenten erneut starten: banwall setup"
+		_wiz_warnung "Ohne einen Benutzer mit sudo-Rechten und SSH-Key kann Banwall den Passwort-Login nicht abschalten. Der nächste Schritt richtet einen ein."
 	fi
 }
 
 # --------------------------------------------------------------- Schritte
 
+# Der Admin-Benutzer wird bewusst nicht mitgezählt: er kommt nur, wenn
+# er fehlt, und eine Nummerierung, die mal bis 5 und mal bis 6 läuft,
+# verwirrt mehr als sie hilft.
+_wiz_schritt_adminuser() {
+	# Wer schon per Key hereinkommt, braucht diesen Schritt nicht.
+	((WIZ_KEYS_OK)) && return 0
+
+	_wiz_titel "Admin-Benutzer"
+
+	if [[ -n "$WIZ_SUDO_USER" ]]; then
+		_wiz_absatz "Es gibt Benutzer mit sudo-Rechten ($WIZ_SUDO_USER), aber keiner hat einen SSH-Key hinterlegt."
+	else
+		_wiz_absatz "Auf diesem Server gibt es keinen Benutzer mit sudo-Rechten - nur root."
+	fi
+	_wiz_absatz "Solange das so bleibt, muss der Passwort-Login anbleiben. Sonst käme nach 'banwall apply' niemand mehr herein."
+
+	_wiz_warnung "Dieser Schritt wird sofort ausgeführt - als einziger im Assistenten: Benutzer anlegen, Gruppe ${BANWALL_SUDO_GROUP:-sudo}, Key hinterlegen. Nur so kannst du den Login testen, bevor 'banwall apply' den Passwort-Weg zusperrt."
+
+	local machen
+	_wiz_jn machen 1 "Jetzt einen Admin-Benutzer mit SSH-Key einrichten?"
+	if ((machen == 0)); then
+		_wiz_hinweis "Übersprungen. Der Assistent lässt Passwort-Logins an und weist im SSH-Schritt erneut darauf hin."
+		return 0
+	fi
+
+	local vorgabe="${WIZ_SUDO_USER%% *}"
+	while true; do
+		_wiz_frage WIZ_ADMIN_USER "${vorgabe:-admin}" "Benutzername"
+		adminuser_name_gueltig "$WIZ_ADMIN_USER" && break
+		_wiz_fehler "Erlaubt sind a-z, 0-9, _ und -, beginnend mit Buchstabe oder _."
+	done
+	if adminuser_exists "$WIZ_ADMIN_USER"; then
+		printf '\n'
+		_wiz_neutral "$WIZ_ADMIN_USER gibt es schon - das Konto bleibt, es kommen nur sudo-Rechte und der Key dazu."
+	fi
+
+	printf '\n'
+	_wiz_absatz "Jetzt der öffentliche Schlüssel deines Arbeitsplatzes - der aus der .pub-Datei, nicht der private."
+	printf '\n'
+	printf '    %s# auf deinem Arbeitsplatz, nicht hier:%s\n' "$_C_DIM" "$_C_RST"
+	printf '    cat ~/.ssh/id_ed25519.pub\n'
+	printf '    %s# fehlt die Datei: ssh-keygen -t ed25519%s\n' "$_C_DIM" "$_C_RST"
+
+	while true; do
+		_wiz_frage WIZ_ADMIN_KEY "" "Schlüssel hier einfügen (eine Zeile, beginnt mit ssh-)"
+		adminuser_key_gueltig "$WIZ_ADMIN_KEY" && break
+		_wiz_fehler "Das ist kein gültiger öffentlicher Schlüssel."
+	done
+
+	printf '\n'
+	if ! adminuser_einrichten "$WIZ_ADMIN_USER" "$WIZ_ADMIN_KEY"; then
+		WIZ_ADMIN_USER=""
+		_wiz_gefahr "Einrichten fehlgeschlagen - siehe Meldung oben. Der Assistent läuft weiter, lässt Passwort-Logins aber an."
+		_wiz_weiter
+		return 0
+	fi
+	_wiz_gut "$WIZ_ADMIN_USER angelegt, in Gruppe ${BANWALL_SUDO_GROUP:-sudo}, Key hinterlegt"
+
+	printf '\n'
+	local pw
+	_wiz_jn pw 1 "Passwort für $WIZ_ADMIN_USER setzen? (braucht sudo - für SSH wird es nicht verwendet)"
+	if ((pw)); then
+		printf '\n'
+		adminuser_passwort_setzen "$WIZ_ADMIN_USER" || _wiz_fehler "passwd ist fehlgeschlagen - später nachholen: passwd $WIZ_ADMIN_USER"
+	else
+		_wiz_hinweis "Ohne Passwort funktioniert 'sudo' für $WIZ_ADMIN_USER nicht. Nachholen mit: passwd $WIZ_ADMIN_USER"
+	fi
+
+	# Lage neu bewerten - daran hängen die Vorgaben im SSH-Schritt.
+	printf '\n'
+	if _wiz_key_lage; then
+		WIZ_KEYS_OK=1
+		_wiz_gut "Key-Login jetzt möglich für: $WIZ_KEY_USER"
+	else
+		_wiz_schlecht "Der Key wird trotzdem nicht erkannt - Passwort-Logins bleiben an."
+	fi
+
+	local host
+	host="$(hostname -I 2>/dev/null | awk '{print $1}')"
+	_wiz_gefahr "Teste den Zugang JETZT in einem zweiten Terminal, bevor du weitermachst:
+
+  ssh $WIZ_ADMIN_USER@${host:-<server>}
+
+Klappt das nicht, brich hier ab (Strg-C) und suche den Fehler - danach: banwall setup"
+	_wiz_weiter
+}
+
 _WIZ_SCHRITTE=5
 
 _wiz_schritt_firewall() {
-	_wiz_titel 1 "$_WIZ_SCHRITTE" "Firewall (nftables)"
+	_wiz_titel "Firewall" 1 "$_WIZ_SCHRITTE"
 
-	_wiz_absatz "Banwall verbietet eingehende Verbindungen grundsätzlich und erlaubt nur die Ports, die du hier angibst. Ausgehende Verbindungen bleiben unbeschränkt, damit Updates und dein eigener Datenverkehr weiter funktionieren."
+	_wiz_absatz "Eingehend ist alles gesperrt - erreichbar bleiben nur die Ports, die du hier angibst. Ausgehend ändert sich nichts."
 
-	_wiz_gefahr "Der SSH-Port MUSS in dieser Liste stehen. Fehlt er, kommst du nach dem nächsten Neustart nicht mehr auf den Server. Banwall prüft das und bricht sonst ab - verlass dich aber nicht darauf, sondern schau selbst hin."
+	_wiz_gefahr "Der SSH-Port muss in der Liste stehen, sonst sperrst du dich aus. Banwall prüft das - schau trotzdem selbst hin."
 
-	printf '  Auf diesem Server lauschen aktuell:\n\n'
+	printf '\n  %sLauschende TCP-Dienste%s\n\n' "$_C_BOLD" "$_C_RST"
 	local vorschlag="" port dienst
 	while read -r port dienst; do
 		[[ -n "$port" ]] || continue
@@ -314,20 +417,18 @@ _wiz_schritt_firewall() {
 	done
 	sicher="$(tr ' ' '\n' <<<"$sicher" | sort -un | paste -sd' ' -)"
 
-	_wiz_hinweis "Nur was von außen erreichbar sein muss, gehört in die Liste. Datenbanken, Caches und Verwaltungsoberflächen gehören fast nie dazu - die erreichst du besser über einen SSH-Tunnel."
+	_wiz_hinweis "Datenbanken, Caches und Admin-Oberflächen gehören fast nie in die Liste - dafür ist ein SSH-Tunnel der bessere Weg."
 
 	while true; do
 		_wiz_frage WIZ_TCP_PORTS "$sicher" \
-			"Welche TCP-Ports sollen von außen erreichbar sein? (durch Leerzeichen getrennt)"
+			"Welche TCP-Ports sollen von außen erreichbar sein? (Leerzeichen-getrennt)"
 		if ! _wiz_ports_gueltig "$WIZ_TCP_PORTS"; then
-			printf '  %sUngültige Portangabe. Erlaubt sind Zahlen von 1 bis 65535.%s\n' \
-				"$_C_RED" "$_C_RST"
+			_wiz_fehler "Ungültig - erlaubt sind Zahlen von 1 bis 65535."
 			continue
 		fi
 		# shellcheck disable=SC2086  # Wort-Splitting gewollt: ein Argument je Port
 		if ! array_contains "$WIZ_SSH_PORT" $WIZ_TCP_PORTS; then
-			printf '  %sDer SSH-Port %s fehlt. Das würde dich aussperren.%s\n' \
-				"$_C_RED" "$WIZ_SSH_PORT" "$_C_RST"
+			_wiz_fehler "Der SSH-Port $WIZ_SSH_PORT fehlt - das würde dich aussperren."
 			continue
 		fi
 		break
@@ -335,65 +436,65 @@ _wiz_schritt_firewall() {
 
 	while true; do
 		_wiz_frage WIZ_UDP_PORTS "$WIZ_UDP_PORTS" \
-			"Welche UDP-Ports? (leer lassen, wenn keine - z. B. 51820 für WireGuard)"
+			"Welche UDP-Ports? (leer = keine, z. B. 51820 für WireGuard)"
 		_wiz_ports_gueltig "$WIZ_UDP_PORTS" && break
-		printf '  %sUngültige Portangabe.%s\n' "$_C_RED" "$_C_RST"
+		_wiz_fehler "Ungültige Portangabe."
 	done
 
-	_wiz_absatz ""
-	_wiz_absatz "Netze mit vollem Zugang umgehen die Portfilterung vollständig und werden von fail2ban nie gesperrt. Sinnvoll für ein Büro-Netz, ein VPN oder ein Monitoring-System."
-	_wiz_warnung "Trage hier nur Netze ein, die du selbst kontrollierst. Eine Adresse, die dir nicht dauerhaft gehört - etwa ein wechselnder Heimanschluss - kann später jemand anderem gehören."
+	printf '\n'
+	_wiz_absatz "Netze mit vollem Zugang umgehen die Portfilterung und werden von fail2ban nie gesperrt - gedacht für Büro-Netz, VPN oder Monitoring."
+	_wiz_warnung "Nur Netze eintragen, die dir dauerhaft gehören. Ein wechselnder Heimanschluss gehört morgen jemand anderem."
 	_wiz_frage WIZ_ALLOW_NETS "$WIZ_ALLOW_NETS" \
-		"Netze mit vollem Zugang? (z. B. 203.0.113.0/24, leer lassen für keine)"
+		"Netze mit vollem Zugang? (z. B. 203.0.113.0/24, leer = keine)"
 
 	_wiz_jn WIZ_ALLOW_PING "$WIZ_ALLOW_PING" \
-		"Auf Ping antworten? (empfohlen: ja, erleichtert Fehlersuche und Monitoring)"
+		"Auf Ping antworten? (empfohlen - hilft bei Fehlersuche und Monitoring)"
 	_wiz_jn WIZ_SSH_RATE_LIMIT "$WIZ_SSH_RATE_LIMIT" \
 		"Neue SSH-Verbindungen auf 10 pro Minute begrenzen? (bremst Bruteforce)"
 }
 
 _wiz_schritt_ssh() {
-	_wiz_titel 2 "$_WIZ_SCHRITTE" "SSH-Zugang"
+	_wiz_titel "SSH-Zugang" 2 "$_WIZ_SCHRITTE"
 
-	_wiz_absatz "Das ist der Schritt mit dem größten Risiko. Ein Fehler hier kostet den Zugang zum Server."
+	_wiz_absatz "Der heikelste Schritt: Ein Fehler hier kostet den Zugang zum Server."
 
 	if ((WIZ_KEYS_OK)); then
 		_wiz_gut "Key-Login ist möglich für: $WIZ_KEY_USER"
-		_wiz_absatz ""
-		_wiz_absatz "Damit kannst du Passwort-Logins gefahrlos abschalten. Das ist die wirksamste Einzelmaßnahme gegen Bruteforce-Angriffe: ohne Passwort-Login sind sie schlicht wirkungslos."
+		printf '\n'
+		_wiz_absatz "Damit kannst du Passwort-Logins gefahrlos abschalten - die wirksamste Einzelmaßnahme gegen Bruteforce."
 	else
-		_wiz_gefahr "Es wurde kein Benutzer mit sudo-Rechten UND SSH-Key gefunden. Wenn du Passwort-Logins jetzt abschaltest, kommt niemand mehr auf diesen Server - auch du nicht.
+		_wiz_gefahr "Kein Benutzer mit sudo-Rechten und SSH-Key gefunden. Passwort-Logins jetzt abzuschalten heißt: niemand kommt mehr rein, auch du nicht.
 
-Der Assistent schlägt deshalb vor, Passwort-Logins vorerst anzulassen. Hinterlege einen Schlüssel und starte 'banwall setup' danach erneut."
+Vorschlag: vorerst anlassen, Schlüssel hinterlegen, 'banwall setup' erneut starten."
 	fi
 
 	local vorgabe_pw=1 vorgabe_root=1
 	((WIZ_KEYS_OK)) || { vorgabe_pw=2; vorgabe_root=3; }
 
 	_wiz_auswahl WIZ_SSH_PASSWORD_AUTH "$vorgabe_pw" \
-		"Passwort-Anmeldung über SSH:" -- \
-		"abschalten - nur noch Schlüssel (empfohlen)|no" \
-		"anlassen - Passwörter bleiben erlaubt (unsicher)|yes"
+		"Passwort-Anmeldung über SSH" -- \
+		"abschalten - nur noch Schlüssel   (empfohlen)|no" \
+		"anlassen - Passwörter erlaubt     (unsicher)|yes"
 
 	if [[ "$WIZ_SSH_PASSWORD_AUTH" == "no" ]] && ((WIZ_KEYS_OK == 0)); then
-		_wiz_gefahr "Du schaltest Passwort-Logins ab, obwohl kein Schlüssel gefunden wurde. Banwall wird 'banwall apply' deshalb mit Exit-Code 4 abbrechen und nichts verändern. Das ist der eingebaute Aussperr-Schutz - er greift auch dann, wenn du hier bestätigst."
+		_wiz_gefahr "Passwort-Login aus, aber kein Schlüssel gefunden: 'banwall apply' bricht mit Exit-Code 4 ab und ändert nichts. Der Aussperr-Schutz greift auch, wenn du hier bestätigst."
 	fi
 
 	_wiz_auswahl WIZ_SSH_PERMIT_ROOT "$vorgabe_root" \
-		"Anmeldung als root über SSH:" -- \
-		"verbieten (empfohlen)|no" \
+		"Anmeldung als root über SSH" -- \
+		"verbieten                         (empfohlen)|no" \
 		"nur mit Schlüssel, kein Passwort|prohibit-password" \
-		"erlauben (unsicher)|yes"
+		"erlauben                          (unsicher)|yes"
 
-	_wiz_absatz ""
-	_wiz_absatz "Ein anderer SSH-Port verhindert keine gezielten Angriffe, reduziert aber das Grundrauschen automatisierter Scans erheblich."
-	_wiz_warnung "Wenn du den Port änderst: die laufende Sitzung bleibt bestehen, aber jeder neue Login braucht 'ssh -p PORT'. Trage den neuen Port unbedingt auch in der Firewall ein - der Assistent fragt danach gleich noch einmal."
+	printf '\n'
+	_wiz_absatz "Ein anderer SSH-Port hält gezielte Angriffe nicht auf, senkt aber das Grundrauschen automatischer Scans deutlich."
+	_wiz_warnung "Nach einem Portwechsel bleibt die laufende Sitzung bestehen, jeder neue Login braucht aber 'ssh -p PORT'. Die Firewall-Freigabe zieht der Assistent automatisch nach."
 
 	local alter_port="$WIZ_SSH_PORT"
 	while true; do
-		_wiz_frage WIZ_SSH_PORT "$WIZ_SSH_PORT" "SSH-Port:"
+		_wiz_frage WIZ_SSH_PORT "$WIZ_SSH_PORT" "SSH-Port"
 		_wiz_ports_gueltig "$WIZ_SSH_PORT" && break
-		printf '  %sUngültige Portangabe.%s\n' "$_C_RED" "$_C_RST"
+		_wiz_fehler "Ungültige Portangabe."
 	done
 
 	# Portwechsel muss in der Firewall nachgezogen werden, sonst schlägt
@@ -402,19 +503,18 @@ Der Assistent schlägt deshalb vor, Passwort-Logins vorerst anzulassen. Hinterle
 		WIZ_TCP_PORTS="$(tr ' ' '\n' <<<"$WIZ_TCP_PORTS" |
 			grep -vx "$alter_port" | grep -v '^$' | paste -sd' ' -)"
 		WIZ_TCP_PORTS="$WIZ_SSH_PORT${WIZ_TCP_PORTS:+ $WIZ_TCP_PORTS}"
-		_wiz_hinweis "Die Firewall-Freigabe wurde angepasst: Port $alter_port entfernt, Port $WIZ_SSH_PORT ergänzt. Offene TCP-Ports jetzt: $WIZ_TCP_PORTS"
+		_wiz_hinweis "Firewall angepasst: $alter_port raus, $WIZ_SSH_PORT rein. Offene TCP-Ports jetzt: $WIZ_TCP_PORTS"
 	fi
 
-	_wiz_absatz ""
 	_wiz_frage WIZ_SSH_ALLOW_USERS "$WIZ_SSH_ALLOW_USERS" \
-		"Nur bestimmte Benutzer zulassen? (Namen mit Leerzeichen, leer = alle mit Schlüssel)"
+		"Nur bestimmte Benutzer zulassen? (Leerzeichen-getrennt, leer = alle mit Schlüssel)"
 }
 
 _wiz_schritt_fail2ban() {
-	_wiz_titel 3 "$_WIZ_SCHRITTE" "fail2ban"
+	_wiz_titel "fail2ban" 3 "$_WIZ_SCHRITTE"
 
 	_wiz_absatz "fail2ban liest die Logdateien mit und sperrt Adressen, von denen wiederholt fehlgeschlagene Anmeldungen kommen."
-	_wiz_hinweis "Wenn du Passwort-Logins abgeschaltet hast, ist fail2ban nicht mehr die Hauptverteidigung - aber weiterhin nützlich: es hält Logdateien sauber und bremst Angreifer, bevor sie Rechenzeit kosten."
+	_wiz_hinweis "Ohne Passwort-Login ist fail2ban nicht mehr die Hauptverteidigung, hält aber die Logs sauber und spart Rechenzeit."
 
 	_wiz_jn WIZ_ENABLE_FAIL2BAN "$WIZ_ENABLE_FAIL2BAN" "fail2ban einrichten?"
 	((WIZ_ENABLE_FAIL2BAN)) || return 0
@@ -425,46 +525,44 @@ _wiz_schritt_fail2ban() {
 		"streng - 3 Versuche in 5 Minuten, 24 Stunden Sperre|3|5m|24h"
 	IFS='|' read -r WIZ_F2B_MAXRETRY WIZ_F2B_FINDTIME WIZ_F2B_BANTIME <<<"$WIZ_F2B_PROFIL"
 
-	_wiz_warnung "Auch du kannst dich aussperren, wenn du dich mehrfach vertippst. Die Sperre läuft nach $WIZ_F2B_BANTIME von selbst ab. Netze aus Schritt 1 (voller Zugang) sind davon ausgenommen."
+	_wiz_warnung "Auch du kannst dich aussperren, wenn du dich mehrfach vertippst - die Sperre läuft nach $WIZ_F2B_BANTIME von selbst ab. Netze mit vollem Zugang sind ausgenommen."
 
+	# Vorgabe aus dem tatsächlichen Zustand: läuft etwas auf 80/443,
+	# sind die Webserver-Jails vermutlich erwünscht.
 	local webserver_da=0
 	_wiz_lauschende_ports t | awk '$1==80 || $1==443 {gefunden=1} END{exit !gefunden}' && webserver_da=1
-	if ((webserver_da)); then
-		_wiz_hinweis "Auf Port 80 oder 443 läuft ein Dienst. Zusätzliche Jails für nginx und Apache können sinnvoll sein."
-	fi
 	_wiz_jn WIZ_F2B_WEBSERVER "$webserver_da" \
-		"Zusätzliche Regeln für nginx und Apache? (nur sinnvoll, wenn ein Webserver läuft)"
+		"Zusätzliche Regeln für nginx und Apache? (nur sinnvoll mit Webserver)"
 }
 
 _wiz_schritt_updates() {
-	_wiz_titel 4 "$_WIZ_SCHRITTE" "Automatische Sicherheitsupdates"
+	_wiz_titel "Sicherheitsupdates" 4 "$_WIZ_SCHRITTE"
 
-	_wiz_absatz "Banwall richtet unattended-upgrades so ein, dass ausschließlich Sicherheitsaktualisierungen automatisch eingespielt werden. Normale Paketupdates bleiben deine Entscheidung."
-	_wiz_hinweis "Das ist bewusst eingeschränkt: Alle Updates automatisch einzuspielen ist ein Verfügbarkeitsrisiko. Ungepatchte Sicherheitslücken sind aber das größere Risiko - deshalb diese Aufteilung."
+	_wiz_absatz "Banwall richtet unattended-upgrades so ein, dass nur Sicherheitsupdates automatisch kommen. Alles andere bleibt deine Entscheidung."
 
 	_wiz_jn WIZ_ENABLE_UPDATES "$WIZ_ENABLE_UPDATES" "Automatische Sicherheitsupdates einrichten?"
 	((WIZ_ENABLE_UPDATES)) || return 0
 
-	_wiz_absatz ""
-	_wiz_absatz "Manche Updates - vor allem Kernel-Aktualisierungen - wirken erst nach einem Neustart."
-	_wiz_warnung "Automatischer Neustart bedeutet: Der Server kann nachts ohne Vorwarnung neu starten. Dienste, die nicht sauber automatisch hochkommen, sind danach weg. Ohne automatischen Neustart läuft der Server mit dem alten Kernel weiter, bis du selbst neu startest - 'ls /var/run/reboot-required' zeigt, ob das ansteht."
+	printf '\n'
+	_wiz_absatz "Manche Updates - vor allem am Kernel - wirken erst nach einem Neustart."
+	_wiz_warnung "Automatischer Neustart heißt: Der Server kann nachts ohne Vorwarnung neu starten - Dienste, die nicht sauber hochkommen, sind danach weg. Ohne ihn läuft der alte Kernel weiter; 'ls /var/run/reboot-required' zeigt, ob ein Neustart ansteht."
 
 	_wiz_jn WIZ_UPDATES_AUTOREBOOT "$WIZ_UPDATES_AUTOREBOOT" \
 		"Automatischen Neustart erlauben, wenn ein Update ihn erfordert?"
 	if ((WIZ_UPDATES_AUTOREBOOT)); then
 		_wiz_frage WIZ_UPDATES_REBOOT_TIME "$WIZ_UPDATES_REBOOT_TIME" \
-			"Zu welcher Uhrzeit darf neu gestartet werden? (HH:MM)"
+			"Uhrzeit für den Neustart (HH:MM)"
 	fi
 }
 
 _wiz_schritt_blocklist() {
-	_wiz_titel 5 "$_WIZ_SCHRITTE" "IP-Blocklisten"
+	_wiz_titel "IP-Blocklisten" 5 "$_WIZ_SCHRITTE"
 
-	_wiz_absatz "Banwall kann Listen bekannter Angreiferadressen herunterladen und in die Firewall laden. Voreingestellt ist die von IPv64 gepflegte Fassung der blocklist.de-Liste: rund 26.000 Adressen, die durch SSH-, Mail- oder Web-Angriffe auffällig geworden sind."
+	_wiz_absatz "Banwall lädt Listen bekannter Angreiferadressen herunter und sperrt sie in der Firewall. Voreingestellt: blocklist.de über IPv64, rund 26.000 Adressen."
 
-	_wiz_hinweis "Was du hier einträgst, entscheidet mit, wen dein Server aussperrt. Banwall entfernt aus jeder Liste automatisch: deine eigenen Adressen, die Gegenstelle deiner laufenden SSH-Sitzung, private Netze, Link-Local und CGNAT. Gegen eine schlecht gepflegte Quelle hilft das nur begrenzt - nimm wenige Listen, denen du vertraust.
+	_wiz_hinweis "Aus jeder Liste entfernt Banwall automatisch deine eigenen Adressen, die Gegenstelle dieser SSH-Sitzung sowie private Netze und CGNAT. Gegen eine schlecht gepflegte Quelle hilft das nur begrenzt - nimm wenige Listen, denen du vertraust.
 
-Die Listen stammen von IPv64.net, das sie aufbereitet und kostenlos bereitstellt; Originalquelle ist blocklist.de. Es gibt keine Verfügbarkeitsgarantie, und IPv64 bittet darum, den Dienst nicht zu überlasten - deshalb ist täglich die Empfehlung."
+IPv64.net stellt die Listen kostenlos bereit, ohne Verfügbarkeitsgarantie und mit der Bitte, den Dienst nicht zu überlasten."
 
 	_wiz_jn WIZ_ENABLE_BLOCKLIST "$WIZ_ENABLE_BLOCKLIST" "IP-Blocklisten verwenden?"
 	((WIZ_ENABLE_BLOCKLIST)) || { WIZ_BLOCKLIST_URLS=""; return 0; }
@@ -479,24 +577,21 @@ Die Listen stammen von IPv64.net, das sie aufbereitet und kostenlos bereitstellt
 	if [[ "$WIZ_BLOCKLIST_URLS" == "EIGENE" ]]; then
 		while true; do
 			_wiz_frage WIZ_BLOCKLIST_URLS "" \
-				"URLs der Blocklisten (durch Leerzeichen getrennt, nur https)"
+				"URLs der Blocklisten (Leerzeichen-getrennt, nur https)"
 			local url fehler=0
 			for url in $WIZ_BLOCKLIST_URLS; do
 				[[ "$url" == https://* ]] || {
-					printf '  %s%s ist kein https - über http könnte jeder die Liste fälschen.%s\n' \
-						"$_C_RED" "$url" "$_C_RST"
+					_wiz_fehler "$url ist kein https - über http könnte jeder die Liste fälschen."
 					fehler=1
 				}
 			done
 			((fehler)) || [[ -z "$WIZ_BLOCKLIST_URLS" ]] || break
-			[[ -z "$WIZ_BLOCKLIST_URLS" ]] && {
-				printf '  %sMindestens eine Quelle angeben.%s\n' "$_C_RED" "$_C_RST"
-			}
+			[[ -z "$WIZ_BLOCKLIST_URLS" ]] && _wiz_fehler "Mindestens eine Quelle angeben."
 		done
 	fi
 
 	if [[ "$WIZ_BLOCKLIST_URLS" == *"ipv64_blocklist_all"* ]]; then
-		_wiz_warnung "Die komplette IPv64-Liste enthält ganze Netze bis /16. Damit sperrst du auch Adressen, die selbst nie auffällig geworden sind. Auf einem Server mit Publikumsverkehr kann das echte Nutzer treffen."
+		_wiz_warnung "Die komplette IPv64-Liste sperrt ganze Netze bis /16 - darunter Adressen, die nie auffällig waren. Auf einem Server mit Publikumsverkehr kann das echte Nutzer treffen."
 	fi
 
 	_wiz_auswahl WIZ_BLOCKLIST_INTERVAL 2 "Wie oft sollen die Listen aktualisiert werden?" -- \
@@ -507,17 +602,17 @@ Die Listen stammen von IPv64.net, das sie aufbereitet und kostenlos bereitstellt
 
 # --------------------------------------------------------- Zusammenfassung
 
-_wiz_zeile() { printf '     %-30s %s\n' "$1" "$2"; }
-_wiz_gruppe() { printf '\n  %s%s) %s%s\n' "$_C_BLU" "$1" "$2" "$_C_RST"; }
+_wiz_zeile() { printf '     %s%-28s%s %s\n' "$_C_DIM" "$1" "$_C_RST" "$2"; }
+_wiz_gruppe() { printf '\n  %s%s%s  %s%s%s\n' "$_C_BLU" "$1" "$_C_RST" "$_C_BOLD" "$2" "$_C_RST"; }
 
 _wiz_ja_nein() { (($1)) && printf 'ja' || printf 'nein'; }
 
 _wiz_zusammenfassung_zeigen() {
-	_wiz_titel "Zusammenfassung" "" ""
-	_wiz_absatz "So wird Banwall eingerichtet. Bis hierher wurde nichts verändert."
+	_wiz_titel "Zusammenfassung"
+	_wiz_absatz "So wird Banwall eingerichtet. Außer einem eventuell angelegten Admin-Benutzer ist bis hierher nichts verändert."
 
-	_wiz_gruppe 1 "Firewall (nftables)"
-	_wiz_zeile "eingehend" "verboten, außer den Ports unten"
+	_wiz_gruppe 1 "Firewall"
+	_wiz_zeile "eingehend" "gesperrt, außer den Ports unten"
 	_wiz_zeile "ausgehend" "erlaubt"
 	_wiz_zeile "offene TCP-Ports" "${WIZ_TCP_PORTS:-keine}"
 	_wiz_zeile "offene UDP-Ports" "${WIZ_UDP_PORTS:-keine}"
@@ -530,14 +625,20 @@ _wiz_zusammenfassung_zeigen() {
 	if [[ "$WIZ_SSH_PASSWORD_AUTH" == "no" ]]; then
 		_wiz_zeile "Passwort-Anmeldung" "abgeschaltet"
 	else
-		printf '     %-30s %sERLAUBT%s\n' "Passwort-Anmeldung" "$_C_YEL" "$_C_RST"
+		printf '     %s%-28s%s %sERLAUBT%s\n' \
+			"$_C_DIM" "Passwort-Anmeldung" "$_C_RST" "$_C_YEL" "$_C_RST"
 	fi
 	case "$WIZ_SSH_PERMIT_ROOT" in
 	no) _wiz_zeile "root-Anmeldung" "verboten" ;;
 	prohibit-password) _wiz_zeile "root-Anmeldung" "nur mit Schlüssel" ;;
-	yes) printf '     %-30s %sERLAUBT%s\n' "root-Anmeldung" "$_C_YEL" "$_C_RST" ;;
+	yes)
+		printf '     %s%-28s%s %sERLAUBT%s\n' \
+			"$_C_DIM" "root-Anmeldung" "$_C_RST" "$_C_YEL" "$_C_RST"
+		;;
 	esac
 	_wiz_zeile "zugelassene Benutzer" "${WIZ_SSH_ALLOW_USERS:-alle mit Schlüssel}"
+	[[ -n "$WIZ_ADMIN_USER" ]] &&
+		_wiz_zeile "Admin-Benutzer" "$WIZ_ADMIN_USER (bereits angelegt)"
 
 	_wiz_gruppe 3 "fail2ban"
 	if ((WIZ_ENABLE_FAIL2BAN)); then
@@ -548,7 +649,7 @@ _wiz_zusammenfassung_zeigen() {
 		_wiz_zeile "" "wird nicht eingerichtet"
 	fi
 
-	_wiz_gruppe 4 "Automatische Sicherheitsupdates"
+	_wiz_gruppe 4 "Sicherheitsupdates"
 	if ((WIZ_ENABLE_UPDATES)); then
 		_wiz_zeile "Security-Updates" "automatisch"
 		if ((WIZ_UPDATES_AUTOREBOOT)); then
@@ -580,17 +681,17 @@ _wiz_zusammenfassung_zeigen() {
 	# Was der Nutzer nach dem Bestätigen wissen muss.
 	printf '\n'
 	_wiz_linie
-	printf '\n  %sWas danach passiert%s\n\n' "$_C_BLU" "$_C_RST"
-	_wiz_absatz "Der Assistent speichert diese Einstellungen nach $BANWALL_CONFIG_FILE. Verändert wird das System dadurch noch nicht - das macht erst 'banwall apply'."
+	printf '\n'
+	_wiz_absatz "Speichern schreibt nur $BANWALL_CONFIG_FILE. Am System ändert erst 'banwall apply' etwas."
 
 	if [[ "$WIZ_SSH_PASSWORD_AUTH" == "no" ]] && ((WIZ_KEYS_OK == 0)); then
-		_wiz_gefahr "Passwort-Logins sollen abgeschaltet werden, aber es wurde kein Benutzer mit sudo-Rechten und SSH-Key gefunden. 'banwall apply' wird deshalb mit Exit-Code 4 abbrechen, ohne etwas zu ändern. Hinterlege zuerst einen Schlüssel."
+		_wiz_gefahr "Passwort-Login soll aus, aber kein Benutzer mit sudo-Rechten und SSH-Key gefunden. 'banwall apply' bricht mit Exit-Code 4 ab, ohne etwas zu ändern. Hinterlege zuerst einen Schlüssel."
 	elif ((WIZ_UEBER_SSH)); then
-		_wiz_warnung "Du bist über SSH verbunden - also über genau die Verbindung, die Banwall gleich anfasst. Lass diese Sitzung offen, bis du dich in einem ZWEITEN Terminal erfolgreich neu angemeldet hast:
+		_wiz_warnung "Du bist über SSH verbunden - über genau die Verbindung, die Banwall gleich anfasst. Lass diese Sitzung offen, bis der Login in einem zweiten Terminal klappt:
 
   ssh -p $WIZ_SSH_PORT ${WIZ_KEY_USER%% *}@$(hostname -I 2>/dev/null | awk '{print $1}')
 
-Klappt das nicht, nimmt 'banwall rollback' in der noch offenen Sitzung alles zurück."
+Klappt er nicht, nimmt 'banwall rollback' hier alles zurück."
 	fi
 }
 
@@ -600,10 +701,9 @@ _wiz_zusammenfassung() {
 		_wiz_zusammenfassung_zeigen
 		printf '\n'
 		_wiz_linie
-		printf '\n  Nummer eingeben, um einen Bereich zu ändern.\n'
-		printf '  %s[Enter]%s speichern   %sa%s abbrechen\n' \
-			"$_C_GRN" "$_C_RST" "$_C_RED" "$_C_RST"
-		printf '\n  Auswahl: '
+		printf '\n  %s1-5%s ändern   %s[Enter]%s speichern   %sa%s abbrechen\n\n' \
+			"$_C_BLU" "$_C_RST" "$_C_GRN" "$_C_RST" "$_C_RED" "$_C_RST"
+		_wiz_prompt ""
 		read -r auswahl </dev/tty || auswahl="a"
 		printf '\n'
 
@@ -615,7 +715,7 @@ _wiz_zusammenfassung() {
 		3) _wiz_schritt_fail2ban ;;
 		4) _wiz_schritt_updates ;;
 		5) _wiz_schritt_blocklist ;;
-		*) printf '\n  %sBitte 1 bis 5, [Enter] oder a eingeben.%s\n' "$_C_YEL" "$_C_RST" ;;
+		*) _wiz_fehler "Bitte 1 bis 5, [Enter] oder a." ;;
 		esac
 	done
 }
@@ -634,7 +734,8 @@ _wiz_schreiben() {
 		local sicherung
 		sicherung="${ziel}.$(date +%Y%m%d-%H%M%S).bak"
 		cp -a "$ziel" "$sicherung"
-		printf '\n  Bisherige Konfiguration gesichert: %s\n' "$sicherung"
+		printf '\n'
+		_wiz_neutral "Bisherige Konfiguration gesichert: $sicherung"
 	fi
 
 	cat >"$ziel" <<CONF
@@ -721,47 +822,51 @@ _wiz_vorgaben() {
 	WIZ_KEY_USER=""
 	WIZ_SUDO_USER=""
 	WIZ_UEBER_SSH=0
+	WIZ_ADMIN_USER=""
+	WIZ_ADMIN_KEY=""
 }
 
 _wiz_willkommen() {
 	clear 2>/dev/null || true
-	printf '\n%s' "$_C_BLU"
-	_wiz_linie '━'
-	printf '  Banwall %s - Ersteinrichtung\n' "$BANWALL_VERSION"
-	_wiz_linie '━'
-	printf '%s\n' "$_C_RST"
+	printf '\n  %sBanwall %s%s %s· Ersteinrichtung%s\n' \
+		"$_C_BOLD" "$BANWALL_VERSION" "$_C_RST" "$_C_DIM" "$_C_RST"
+	_wiz_linie
 
-	_wiz_absatz "Dieser Assistent führt durch die Sicherheitsgrundeinrichtung dieses Servers. Er stellt Fragen zu fünf Bereichen:"
 	printf '\n'
-	printf '    1  Firewall          welche Ports von außen erreichbar sind\n'
-	printf '    2  SSH-Zugang        Passwort-Login, root-Login, Port\n'
-	printf '    3  fail2ban          Sperren nach fehlgeschlagenen Anmeldungen\n'
-	printf '    4  Updates           automatische Sicherheitsaktualisierungen\n'
-	printf '    5  Blocklisten       bekannte Angreiferadressen sperren\n'
+	_wiz_absatz "Fünf Bereiche, dann steht die Grundabsicherung:"
 	printf '\n'
-	_wiz_absatz "Am Ende siehst du eine Zusammenfassung und kannst jeden Bereich noch einmal ändern, bevor irgendetwas gespeichert wird."
+	printf '    %s1%s  Firewall      welche Ports von außen erreichbar sind\n' "$_C_BLU" "$_C_RST"
+	printf '    %s2%s  SSH-Zugang    Passwort-Login, root-Login, Port\n' "$_C_BLU" "$_C_RST"
+	printf '    %s3%s  fail2ban      Sperren nach fehlgeschlagenen Anmeldungen\n' "$_C_BLU" "$_C_RST"
+	printf '    %s4%s  Updates       automatische Sicherheitsupdates\n' "$_C_BLU" "$_C_RST"
+	printf '    %s5%s  Blocklisten   bekannte Angreiferadressen sperren\n' "$_C_BLU" "$_C_RST"
+	printf '\n'
+	_wiz_absatz "Am Ende kommt eine Zusammenfassung, in der du jeden Bereich noch einmal ändern kannst."
 
-	_wiz_hinweis "Der Assistent verändert das System NICHT. Er schreibt nur eine Konfigurationsdatei. Erst 'banwall apply' setzt die Einstellungen um - und auch das kannst du vorher mit 'banwall apply --dry-run' ansehen."
+	_wiz_hinweis "Hier wird nur eine Konfigurationsdatei geschrieben. Am System ändert erst 'banwall apply' etwas - und das lässt sich vorher mit '--dry-run' ansehen.
+
+Einzige Ausnahme: Fehlt ein Admin-Benutzer mit SSH-Key, bietet der Assistent gleich an, einen anzulegen."
 
 	if [[ -n "${SSH_CONNECTION:-}" ]]; then
-		_wiz_warnung "Du arbeitest über SSH. Öffne jetzt ein zweites Terminal zu diesem Server und lass es offen. Falls nach 'banwall apply' etwas schiefgeht, ist das deine Rückfahrkarte - dort nimmt 'banwall rollback' alles zurück."
+		_wiz_warnung "Du arbeitest über SSH. Öffne jetzt ein zweites Terminal zu diesem Server und lass es offen - das ist deine Rückfahrkarte, falls der Zugang wegbricht."
 	fi
 
 	_wiz_weiter
 }
 
 _wiz_abschluss() {
-	_wiz_titel "Fertig" "" ""
-	_wiz_absatz "Die Konfiguration ist gespeichert. Das System ist noch unverändert."
-	printf '\n  Nächste Schritte:\n\n'
-	printf '    %s1.%s banwall apply --dry-run     ansehen, was passieren würde\n' "$_C_BLU" "$_C_RST"
-	printf '    %s2.%s banwall apply               anwenden\n' "$_C_BLU" "$_C_RST"
-	printf '    %s3.%s in einem NEUEN Terminal anmelden - bevor du dieses schließt\n' "$_C_BLU" "$_C_RST"
-	printf '\n'
-	printf '  Weitere Befehle:\n\n'
-	printf '    banwall status              zeigt den Ist-Zustand\n'
-	printf '    banwall rollback            nimmt alle Änderungen zurück\n'
-	printf '    banwall setup               diesen Assistenten erneut starten\n'
+	_wiz_titel "Fertig"
+	_wiz_absatz "Konfiguration gespeichert, System noch unverändert."
+
+	printf '\n  %sNächste Schritte%s\n\n' "$_C_BOLD" "$_C_RST"
+	printf '    %s1%s  banwall apply --dry-run   ansehen, was passieren würde\n' "$_C_BLU" "$_C_RST"
+	printf '    %s2%s  banwall apply             anwenden\n' "$_C_BLU" "$_C_RST"
+	printf '    %s3%s  in einem NEUEN Terminal anmelden, bevor du dieses schließt\n' "$_C_BLU" "$_C_RST"
+
+	printf '\n  %sWeitere Befehle%s\n\n' "$_C_BOLD" "$_C_RST"
+	printf '    banwall status      zeigt den Ist-Zustand\n'
+	printf '    banwall rollback    nimmt alle Änderungen zurück\n'
+	printf '    banwall setup       diesen Assistenten erneut starten\n'
 	printf '\n'
 
 	local frage_dry frage_apply
@@ -777,7 +882,7 @@ _wiz_abschluss() {
 	_wiz_jn frage_apply 0 "Einstellungen jetzt anwenden? ('banwall apply')"
 	if ((frage_apply)); then
 		if ((WIZ_UEBER_SSH)); then
-			_wiz_warnung "Letzte Erinnerung: Halte diese Sitzung offen und prüfe den Zugang in einem zweiten Terminal, bevor du sie schließt."
+			_wiz_warnung "Diese Sitzung offen halten und den Zugang in einem zweiten Terminal prüfen, bevor du sie schließt."
 			local sicher
 			_wiz_jn sicher 0 "Verstanden - anwenden?"
 			((sicher)) || { printf '\n  Abgebrochen. Später: banwall apply\n\n'; return 0; }
@@ -811,6 +916,7 @@ banwall_wizard_run() {
 	_wiz_willkommen
 	_wiz_systemcheck
 	_wiz_weiter
+	_wiz_schritt_adminuser
 
 	_wiz_schritt_firewall
 	_wiz_schritt_ssh
@@ -819,7 +925,7 @@ banwall_wizard_run() {
 	_wiz_schritt_blocklist
 
 	if ! _wiz_zusammenfassung; then
-		printf '\n  %sAbgebrochen. Es wurde nichts gespeichert.%s\n\n' "$_C_YEL" "$_C_RST"
+		printf '\n  %sAbgebrochen - es wurde nichts gespeichert.%s\n\n' "$_C_YEL" "$_C_RST"
 		return 1
 	fi
 
@@ -834,7 +940,7 @@ banwall_wizard_run() {
 		( config_load ) 2>&1 | tail -3
 		return 1
 	fi
-	_wiz_gut "Konfiguration geprüft - gültig"
+	_wiz_gut "Konfiguration geprüft"
 
 	_wiz_abschluss
 }

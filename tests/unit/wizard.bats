@@ -9,6 +9,7 @@ load helper
 setup() {
 	setup_banwall
 	load_module ssh
+	load_module adminuser
 	load_module wizard
 	BANWALL_DRY_RUN=0
 }

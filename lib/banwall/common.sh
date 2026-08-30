@@ -15,12 +15,15 @@ _BANWALL_COMMON_LOADED=1
 : "${BANWALL_STATE_DIR:=/var/lib/banwall}"
 
 # Farben nur, wenn wirklich ein Terminal dranhängt. In der CI und in
-# Logfiles wären ANSI-Codes nur Rauschen.
+# Logfiles wären ANSI-Codes nur Rauschen. _C_BLU ist die Akzentfarbe -
+# Cyan statt Blau, weil dunkles Blau auf schwarzem Grund kaum lesbar ist.
 if [[ -t 2 ]] && [[ "${TERM:-dumb}" != "dumb" ]]; then
 	_C_RED=$'\033[31m'; _C_GRN=$'\033[32m'; _C_YEL=$'\033[33m'
-	_C_BLU=$'\033[34m'; _C_DIM=$'\033[2m'; _C_RST=$'\033[0m'
+	_C_BLU=$'\033[36m'; _C_DIM=$'\033[2m'; _C_RST=$'\033[0m'
+	_C_BOLD=$'\033[1m'
 else
 	_C_RED=""; _C_GRN=""; _C_YEL=""; _C_BLU=""; _C_DIM=""; _C_RST=""
+	_C_BOLD=""
 fi
 
 # Alle Logausgaben gehen nach stderr, damit stdout für auswertbare

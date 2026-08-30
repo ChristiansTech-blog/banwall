@@ -5,6 +5,10 @@
 # Kopiert nur Dateien und ändert nichts am System. Die eigentliche
 # Absicherung passiert erst bei 'banwall apply'. Das ist Absicht:
 # installieren und scharfschalten sollen zwei bewusste Schritte sein.
+#
+# Danach übernimmt der Assistent ('banwall setup'). Auch der schreibt
+# nur die Konfiguration - mit einer Ausnahme: Fehlt ein Admin-Benutzer
+# mit SSH-Key, bietet er an, einen anzulegen.
 
 set -Eeuo pipefail
 

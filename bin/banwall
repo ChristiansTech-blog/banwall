@@ -51,7 +51,11 @@ for _mod in "${BANWALL_MODULES[@]}"; do
 	source "$BANWALL_LIB_DIR/$_mod.sh"
 done
 # Der Assistent kommt nach den Modulen: er benutzt die Key-Prüfung aus
-# ssh.sh und ruft am Ende cmd_apply aus diesem Skript.
+# ssh.sh, das Anlegen des Admin-Benutzers aus adminuser.sh und ruft am
+# Ende cmd_apply aus diesem Skript. adminuser.sh ist kein apply-Modul -
+# es läuft nur aus dem Assistenten heraus.
+# shellcheck source=../lib/banwall/adminuser.sh
+source "$BANWALL_LIB_DIR/adminuser.sh"
 # shellcheck source=../lib/banwall/wizard.sh
 source "$BANWALL_LIB_DIR/wizard.sh"
 

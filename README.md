@@ -41,7 +41,9 @@ Banwall selbst.
 
 ### 2. Admin-Benutzer mit SSH-Schlüssel anlegen
 
-Überspringen, wenn es so einen Benutzer schon gibt. Sonst — `admin` durch den
+Überspringen, wenn es so einen Benutzer schon gibt. **Der Assistent in Schritt 3
+bietet das ebenfalls an** — er fragt nach Name und öffentlichem Schlüssel und
+legt den Benutzer sofort an. Wer es lieber vorab selbst macht — `admin` durch den
 gewünschten Namen ersetzen:
 
 ```bash
@@ -87,7 +89,11 @@ Danach startet ein Assistent, der durch die Einrichtung führt. Er erkennt
 laufende Dienste, den SSH-Port und vorhandene SSH-Schlüssel, erklärt zu jedem
 Schritt das Risiko und zeigt am Ende eine Zusammenfassung zum Korrigieren.
 
-**Der Assistent verändert nichts** — er schreibt nur `/etc/banwall/banwall.conf`.
+**Der Assistent schreibt nur `/etc/banwall/banwall.conf`** — umgesetzt wird sie
+erst von `banwall apply`. Eine einzige Ausnahme: Findet er keinen Benutzer mit
+sudo-Rechten und SSH-Key, bietet er an, einen anzulegen (Schritt 2 von oben).
+Das passiert sofort, weil der Key-Login getestet sein muss, *bevor* `banwall
+apply` den Passwort-Login abschaltet.
 
 ### 4. Anwenden
 
