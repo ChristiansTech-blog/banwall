@@ -97,8 +97,11 @@ NFT
 }
 
 banwall_nftables_apply() {
+	# Das Paket bringt nicht nur nft, sondern auch nftables.service -
+	# den aktiviert dieses Modul weiter unten. Deshalb hier immer das
+	# Paket, nicht nur das Kommando.
 	pkg_install nftables
-	require_cmd nft
+	ensure_cmd nft nftables
 
 	mkdir -p "$BANWALL_CONFIG_DIR"
 	backup_file "$BANWALL_NFT_FILE"

@@ -192,8 +192,8 @@ _bl_load_v6() {
 # banwall_blocklist_refresh - ein kompletter Aktualisierungslauf.
 # Wird sowohl von 'banwall blocklist-update' als auch vom Timer gerufen.
 banwall_blocklist_refresh() {
-	require_cmd curl
-	require_cmd nft
+	require_cmd curl "Erst 'banwall apply -m blocklist' - das installiert es."
+	require_cmd nft "Erst 'banwall apply -m nftables' - das installiert es."
 
 	nft list table inet "$BANWALL_NFT_TABLE" >/dev/null 2>&1 ||
 		die 3 "nftables-Tabelle '$BANWALL_NFT_TABLE' fehlt. Erst 'banwall apply -m nftables'."
@@ -286,8 +286,7 @@ banwall_blocklist_refresh() {
 }
 
 banwall_blocklist_apply() {
-	require_cmd curl "Das Paket curl wird zum Holen der Listen gebraucht." ||
-		pkg_install curl
+	ensure_cmd curl curl "Das Paket curl wird zum Holen der Listen gebraucht."
 
 	# Service und Timer aus den Vorlagen installieren. %i-freie Units,
 	# weil es genau eine Blocklist-Konfiguration pro Host gibt.

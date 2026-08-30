@@ -97,6 +97,25 @@ require_cmd() {
 		die 3 "Kommando '$1' nicht gefunden.${2:+ $2}"
 }
 
+# ensure_cmd KOMMANDO PAKET [HINWEIS]
+# Fehlendes Kommando nachinstallieren statt daran zu scheitern.
+# Nicht 'require_cmd x || pkg_install y' schreiben: require_cmd beendet
+# das Programm, der Fallback hinter dem || kommt nie zum Zug.
+ensure_cmd() {
+	local cmd="$1" pkg="$2" hinweis="${3:-}"
+	command -v "$cmd" >/dev/null 2>&1 && return 0
+
+	log_info "Kommando '$cmd' fehlt - installiere Paket '$pkg'."
+	pkg_install "$pkg"
+
+	# Im Trockenlauf wurde nichts installiert. Hier trotzdem
+	# abzubrechen hiesse, den Trockenlauf genau dort scheitern zu
+	# lassen, wo der echte Lauf durchliefe.
+	is_dry_run && return 0
+
+	require_cmd "$cmd" "${hinweis:-Das Paket '$pkg' wurde installiert, '$cmd' ist trotzdem nicht da.}"
+}
+
 array_contains() {
 	local needle="$1" item
 	shift

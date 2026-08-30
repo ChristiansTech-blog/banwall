@@ -145,8 +145,7 @@ CONF
 }
 
 banwall_ssh_apply() {
-	require_cmd sshd "Das Paket openssh-server scheint zu fehlen." ||
-		pkg_install openssh-server
+	ensure_cmd sshd openssh-server "Ohne sshd gibt es nichts zu härten."
 
 	banwall_ssh_guard || return $?
 
