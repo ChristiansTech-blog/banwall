@@ -144,6 +144,60 @@ CONF
 	return 0
 }
 
+# _ssh_unit - wie heißt die SSH-Unit auf diesem System?
+# Debian nennt sie ssh.service, andere Distributionen sshd.service.
+# 'systemctl cat' beantwortet das auch dann, wenn der Dienst gerade
+# nicht läuft - anders als is-active oder is-enabled.
+_ssh_unit() {
+	local unit
+	for unit in ssh.service sshd.service; do
+		systemctl cat "$unit" >/dev/null 2>&1 && { printf '%s' "$unit"; return 0; }
+	done
+	return 1
+}
+
+# _ssh_reload - die neue Konfiguration übernehmen lassen.
+#
+# Debian 13 startet sshd per Socket-Aktivierung: ssh.socket lauscht,
+# ssh.service ist zwischen zwei Logins inaktiv. Ein 'systemctl reload ssh'
+# scheitert dann mit "Unit is not active" - obwohl nichts kaputt ist, denn
+# jede neue Verbindung startet sshd ohnehin mit der frischen Konfiguration.
+# Ein harter Abbruch an dieser Stelle wäre also ein Fehlalarm, der einen
+# vollständig gehärteten Server als gescheitert meldet.
+_ssh_reload() {
+	local unit err
+
+	unit="$(_ssh_unit)" || unit=""
+
+	if is_dry_run; then
+		banwall_run systemctl reload "${unit:-ssh.service}"
+		return 0
+	fi
+
+	if [[ -z "$unit" ]]; then
+		log_warn "Keine SSH-Unit gefunden (weder ssh.service noch sshd.service)."
+		log_warn "Die Konfiguration steht in $BANWALL_SSHD_DROPIN und gilt ab dem nächsten sshd-Start."
+		return 0
+	fi
+
+	if systemctl is-active --quiet "$unit"; then
+		err="$(banwall_run systemctl reload "$unit" 2>&1)" && return 0
+		log_error "'systemctl reload $unit' fehlgeschlagen:"
+		log_error "${err:-keine Ausgabe von systemctl}"
+		return 1
+	fi
+
+	# Dienst inaktiv - bei Socket-Aktivierung der Normalfall.
+	if systemctl is-active --quiet ssh.socket; then
+		log_debug "$unit ist inaktiv, ssh.socket lauscht - neue Sitzungen erben die Konfiguration."
+		return 0
+	fi
+
+	log_warn "$unit läuft nicht, es gibt nichts neu zu laden."
+	log_warn "SSH starten mit: systemctl enable --now ${unit%.service}"
+	return 0
+}
+
 banwall_ssh_apply() {
 	ensure_cmd sshd openssh-server "Ohne sshd gibt es nichts zu härten."
 
@@ -164,9 +218,8 @@ banwall_ssh_apply() {
 	# Konfiguration testen, bevor sshd sie sieht. Ein 'reload' mit
 	# kaputter Config lässt den Dienst beim nächsten Start scheitern.
 	if ! is_dry_run; then
-		if ! sshd -t 2>/dev/null; then
-			local err
-			err="$(sshd -t 2>&1 || true)"
+		local err
+		if ! err="$(sshd -t 2>&1)"; then
 			log_error "sshd lehnt die neue Konfiguration ab:"
 			log_error "$err"
 			log_warn "Nehme das Drop-in zurück, damit SSH erreichbar bleibt."
@@ -190,9 +243,7 @@ banwall_ssh_apply() {
 
 	# reload, nicht restart: bestehende Sitzungen überleben. Falls die
 	# neue Konfiguration doch nicht passt, bleibt das Terminal offen.
-	banwall_run systemctl reload ssh 2>/dev/null ||
-		banwall_run systemctl reload sshd 2>/dev/null ||
-		{ log_error "sshd ließ sich nicht neu laden."; return 1; }
+	_ssh_reload || return 1
 
 	log_ok "SSH gehärtet (Port $BANWALL_SSH_PORT, Root-Login: $BANWALL_SSH_PERMIT_ROOT, Passwort: $BANWALL_SSH_PASSWORD_AUTH)"
 	log_warn "Jetzt in einem NEUEN Terminal testen, bevor du diese Sitzung schließt:"
@@ -218,6 +269,6 @@ banwall_ssh_rollback() {
 	banwall_run rm -f "$BANWALL_SSHD_DROPIN"
 	banwall_run rm -f /etc/systemd/system/ssh.socket.d/banwall-port.conf
 	banwall_run systemctl daemon-reload
-	banwall_run systemctl reload ssh 2>/dev/null || banwall_run systemctl reload sshd 2>/dev/null || true
+	_ssh_reload || true
 	log_ok "SSH-Hardening zurückgenommen."
 }

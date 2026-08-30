@@ -140,7 +140,9 @@ Dazu kommt:
 
 - die erzeugte `sshd_config` wird mit `sshd -t` geprüft, **bevor** sshd sie
   sieht; scheitert der Test, wird sie sofort wieder entfernt
-- `reload` statt `restart` — bestehende Sitzungen überleben
+- `reload` statt `restart` — bestehende Sitzungen überleben; läuft der Dienst
+  wegen der Socket-Aktivierung von Debian 13 gerade nicht, ist das kein Fehler:
+  die nächste Verbindung startet sshd ohnehin mit der neuen Konfiguration
 - ein SSH-Port, der nicht in den offenen Ports steht, lässt schon
   `banwall check` fehlschlagen
 - jede geänderte Datei wird vorher nach `/var/lib/banwall/backups/` gesichert
