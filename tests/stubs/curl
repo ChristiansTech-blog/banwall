@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Stub für 'curl'. Protokolliert den Aufruf und legt, sofern der Testfall
+# über STUB_CURL_FILE eine Datei vorgibt, diese am --output-Ziel ab.
+printf '%s %s\n' "curl" "$*" >>"${STUB_LOG:-/dev/null}"
+
+_ziel=""
+while (($# > 0)); do
+	[[ "$1" == "--output" ]] && { _ziel="${2:-}"; shift; }
+	shift
+done
+
+_rc="${STUB_CURL_RC:-0}"
+if [[ "$_rc" == "0" && -n "$_ziel" && -n "${STUB_CURL_FILE:-}" ]]; then
+	cat "$STUB_CURL_FILE" >"$_ziel"
+fi
+exit "$_rc"

@@ -62,6 +62,11 @@ BANWALL_BLOCKLIST_MAX_ENTRIES=200000
 BANWALL_BLOCKLIST_MAX_BYTES=$((20 * 1024 * 1024))
 BANWALL_BLOCKLIST_TIMEOUT=30
 
+# Selbstupdate ('banwall update'). Geholt wird der Tarball des
+# Standardbranches - wer einen Fork oder einen anderen Zweig fährt,
+# trägt hier die passende URL ein.
+BANWALL_UPDATE_URL="https://codeload.github.com/ChristiansTech-blog/banwall/tar.gz/refs/heads/main"
+
 readonly _BANWALL_BOOL_VARS=(
 	BANWALL_ENABLE_NFTABLES BANWALL_ENABLE_FAIL2BAN BANWALL_ENABLE_SSH
 	BANWALL_ENABLE_UPDATES BANWALL_ENABLE_BLOCKLIST BANWALL_ALLOW_PING
@@ -173,6 +178,11 @@ config_validate() {
 		[[ "$url" == https://* ]] ||
 			die 3 "Blocklist-URL '$url' ist kein https. Über http könnte jeder die Liste fälschen."
 	done
+
+	# Aus dieser URL kommt der Code, der anschließend als root läuft.
+	# Über http könnte ihn jeder auf dem Weg austauschen.
+	[[ "$BANWALL_UPDATE_URL" == https://* ]] ||
+		die 3 "BANWALL_UPDATE_URL '$BANWALL_UPDATE_URL' ist kein https. Von dort kommt Code, der als root läuft."
 
 	if ((BANWALL_ENABLE_BLOCKLIST)) && [[ -z "${BANWALL_BLOCKLIST_URLS// /}" ]]; then
 		die 3 "Blocklist-Modul aktiviert, aber BANWALL_BLOCKLIST_URLS ist leer."

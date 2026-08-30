@@ -20,23 +20,44 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 die() { printf 'Fehler: %s\n' "$*" >&2; exit 1; }
 
+# datei_einbauen MODUS QUELLE ZIEL
+# Baut über eine temporäre Datei im Zielverzeichnis ein und tauscht sie
+# per mv ein. Klingt umständlich, ist aber für 'banwall update' nötig:
+# dabei überschreibt die Installation das gerade laufende banwall-Skript.
+# Direktes Überschreiben zöge der laufenden bash die noch ungelesenen
+# Zeilen unter den Füßen weg; ein mv lässt den alten Inode stehen, bis
+# der Prozess fertig ist.
+datei_einbauen() {
+	local modus="$1" quelle="$2" ziel="$3" tmp
+	tmp="$(mktemp "${ziel}.neu.XXXXXX")" || die "Kann in $(dirname "$ziel") nicht schreiben."
+	cat "$quelle" >"$tmp"
+	chmod "$modus" "$tmp"
+	mv -f "$tmp" "$ziel"
+}
+
 # Standardmäßig führt die Installation direkt in den Assistenten. Für
 # automatisierte Provisionierung lässt sich das abschalten.
 WIZARD=1
+NUR_DATEIEN=0
 AKTION="install"
 while (($# > 0)); do
 	case "$1" in
 	--no-wizard) WIZARD=0 ;;
+	# Von 'banwall update' benutzt: dort sind Konfiguration und
+	# Assistent längst durch, gebraucht werden nur die neuen Dateien.
+	--files-only) WIZARD=0; NUR_DATEIEN=1 ;;
 	install | uninstall) AKTION="$1" ;;
 	-h | --help)
 		cat <<'HILFE'
 install.sh - Banwall installieren
 
-  ./install.sh [install|uninstall] [--no-wizard]
+  ./install.sh [install|uninstall] [--no-wizard|--files-only]
 
   install        Dateien kopieren und den Einrichtungsassistenten starten
   uninstall      Programmdateien entfernen (Konfiguration bleibt)
   --no-wizard    Assistenten überspringen, nur Vorlage anlegen
+  --files-only   Nur Programmdateien einbauen, sonst nichts
+                 (das benutzt 'banwall update')
 
 Umgebungsvariablen: PREFIX (Standard /usr/local), CONFDIR, STATEDIR
 HILFE
@@ -47,21 +68,48 @@ HILFE
 	shift
 done
 
-[[ "$(id -u)" -eq 0 ]] || die "Bitte als root ausführen: sudo ./install.sh"
+# root ist kein Selbstzweck - gebraucht wird Schreibrecht auf die
+# Zielverzeichnisse. Bei den Standardpfaden heißt das root, bei
+# PREFIX=$HOME/.local nicht. Geprüft wird der nächste existierende
+# Vorfahre: das Verzeichnis selbst legt die Installation ja erst an.
+schreibbar() {
+	local pfad="$1"
+	while [[ ! -e "$pfad" ]]; do pfad="$(dirname "$pfad")"; done
+	[[ -w "$pfad" ]]
+}
+
+if [[ "$AKTION" == "install" ]]; then
+	for _d in "$PREFIX" "$CONFDIR" "$STATEDIR"; do
+		schreibbar "$_d" ||
+			die "Kein Schreibrecht auf $_d. Bitte mit sudo ausführen: sudo ./install.sh"
+	done
+else
+	schreibbar "$PREFIX" ||
+		die "Kein Schreibrecht auf $PREFIX. Bitte mit sudo ausführen: sudo ./install.sh uninstall"
+fi
 
 case "$AKTION" in
 install)
 	install -d -m 0755 "$PREFIX/bin" "$PREFIX/lib/banwall" "$PREFIX/share/banwall/systemd"
 	install -d -m 0700 "$CONFDIR" "$STATEDIR"
 
-	install -m 0755 "$SRC/bin/banwall" "$PREFIX/bin/banwall"
-	install -m 0644 "$SRC"/lib/banwall/*.sh "$PREFIX/lib/banwall/"
-	install -m 0644 "$SRC"/share/systemd/* "$PREFIX/share/banwall/systemd/"
-	install -m 0644 "$SRC/share/banwall.conf.example" "$PREFIX/share/banwall/"
+	datei_einbauen 0755 "$SRC/bin/banwall" "$PREFIX/bin/banwall"
+	for f in "$SRC"/lib/banwall/*.sh; do
+		datei_einbauen 0644 "$f" "$PREFIX/lib/banwall/$(basename "$f")"
+	done
+	for f in "$SRC"/share/systemd/*; do
+		datei_einbauen 0644 "$f" "$PREFIX/share/banwall/systemd/$(basename "$f")"
+	done
+	datei_einbauen 0644 "$SRC/share/banwall.conf.example" \
+		"$PREFIX/share/banwall/banwall.conf.example"
 
 	printf 'Banwall %s installiert nach %s\n' \
 		"$(sed -n 's/^BANWALL_VERSION="\(.*\)"/\1/p' "$SRC/bin/banwall" | head -1)" \
 		"$PREFIX/bin/banwall"
+
+	# Beim Update endet der Auftrag hier: Konfiguration liegt schon,
+	# und was zu tun bleibt, sagt 'banwall update' selbst.
+	((NUR_DATEIEN)) && exit 0
 
 	# Der Assistent legt die Konfiguration an. Eine vorhandene Datei
 	# wird nie kommentarlos überschrieben - der Assistent liest sie als

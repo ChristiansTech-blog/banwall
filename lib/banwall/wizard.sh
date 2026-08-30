@@ -872,6 +872,7 @@ _wiz_abschluss() {
 	printf '    banwall status      zeigt den Ist-Zustand\n'
 	printf '    banwall rollback    nimmt alle Änderungen zurück\n'
 	printf '    banwall setup       diesen Assistenten erneut starten\n'
+	printf '    banwall update      Banwall selbst aktualisieren\n'
 	printf '\n'
 
 	local frage_dry frage_apply

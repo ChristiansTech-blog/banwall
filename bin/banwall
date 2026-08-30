@@ -19,10 +19,13 @@ BANWALL_VERSION="0.1.0"
 _self="$(readlink -f "${BASH_SOURCE[0]}")"
 _self_dir="$(dirname "$_self")"
 _root="$(dirname "$_self_dir")"
+BANWALL_CHECKOUT_DIR=""
 if [[ -f "$_root/install.sh" && -d "$_root/lib/banwall" ]]; then
 	# Git-Checkout: share/ liegt direkt neben lib/.
 	BANWALL_LIB_DIR="$_root/lib/banwall"
 	BANWALL_SHARE_DIR="$_root/share"
+	# 'banwall update' darf sich nicht in den Arbeitsbaum installieren.
+	BANWALL_CHECKOUT_DIR="$_root"
 elif [[ -d "$_root/lib/banwall" ]]; then
 	# Installiert: $_root ist das Präfix. Abgeleitet statt fest verdrahtet,
 	# damit auch PREFIX=/opt oder $HOME/.local funktioniert.
@@ -32,8 +35,8 @@ else
 	BANWALL_LIB_DIR="/usr/local/lib/banwall"
 	BANWALL_SHARE_DIR="/usr/local/share/banwall"
 fi
-# shellcheck disable=SC2034  # BANWALL_SHARE_DIR wird in den Modulen gelesen
-readonly BANWALL_VERSION BANWALL_LIB_DIR BANWALL_SHARE_DIR
+# shellcheck disable=SC2034  # BANWALL_SHARE_DIR und BANWALL_CHECKOUT_DIR werden in den Modulen gelesen
+readonly BANWALL_VERSION BANWALL_LIB_DIR BANWALL_SHARE_DIR BANWALL_CHECKOUT_DIR
 
 # shellcheck source=../lib/banwall/common.sh
 source "$BANWALL_LIB_DIR/common.sh"
@@ -56,6 +59,10 @@ done
 # es läuft nur aus dem Assistenten heraus.
 # shellcheck source=../lib/banwall/adminuser.sh
 source "$BANWALL_LIB_DIR/adminuser.sh"
+# Ebenfalls kein apply-Modul: selfupdate.sh tauscht die Programmdateien
+# aus, es verändert nichts am System.
+# shellcheck source=../lib/banwall/selfupdate.sh
+source "$BANWALL_LIB_DIR/selfupdate.sh"
 # shellcheck source=../lib/banwall/wizard.sh
 source "$BANWALL_LIB_DIR/wizard.sh"
 
@@ -74,6 +81,8 @@ Befehle:
   status             Ist-Zustand aller Module anzeigen
   rollback           Änderungen aus den Backups zurücknehmen
   blocklist-update   Blocklisten sofort neu laden (nutzt der Timer)
+  update             Banwall selbst aktualisieren. Tauscht nur die
+                     Programmdateien; danach 'banwall apply'.
   check              Konfiguration und Systemvoraussetzungen prüfen
   version            Version ausgeben
 
@@ -94,6 +103,7 @@ Beispiele:
   banwall apply                     # anwenden
   banwall apply -m ssh              # nur SSH-Hardening nachziehen
   banwall rollback                  # zurück auf den Stand vor banwall
+  banwall update --dry-run          # nur zeigen, was sich ändern würde
 USAGE
 }
 
@@ -244,9 +254,10 @@ main() {
 	help) usage; return 0 ;;
 	esac
 
-	if [[ "$cmd" == "setup" ]]; then
+	if [[ "$cmd" == "setup" || "$cmd" == "update" ]]; then
 		# Bestehende Werte als Vorgabe laden, aber ohne Warnung: dass
-		# noch keine Konfiguration da ist, ist beim Einrichten normal.
+		# noch keine Konfiguration da ist, ist beim Einrichten normal -
+		# und beim Aktualisieren der Programmdateien ohne Belang.
 		config_load 2>/dev/null || true
 	else
 		config_load
@@ -259,6 +270,7 @@ main() {
 	rollback) cmd_rollback ;;
 	check) cmd_check ;;
 	blocklist-update) require_root; banwall_blocklist_refresh ;;
+	update) banwall_selfupdate_run ;;
 	*) die 2 "Unbekannter Befehl '$cmd'. 'banwall --help' zeigt die Hilfe." ;;
 	esac
 }

@@ -117,3 +117,14 @@ BANWALL_BLOCKLIST_INTERVAL="daily"
 BANWALL_BLOCKLIST_MAX_ENTRIES=200000
 BANWALL_BLOCKLIST_MAX_BYTES=20971520
 BANWALL_BLOCKLIST_TIMEOUT=30
+
+# --------------------------------------------------------------------
+# Selbstupdate
+# --------------------------------------------------------------------
+# 'banwall update' holt von hier den neuen Stand. Es tauscht nur die
+# Programmdateien aus - am System ändert sich erst mit 'banwall apply'
+# etwas. Automatisch läuft das nie: ein Werkzeug, das Firewall und
+# SSH-Zugang verwaltet, aktualisiert sich nicht unbeaufsichtigt.
+#
+# Muss https sein: von dieser Adresse kommt Code, der als root läuft.
+BANWALL_UPDATE_URL="https://codeload.github.com/ChristiansTech-blog/banwall/tar.gz/refs/heads/main"

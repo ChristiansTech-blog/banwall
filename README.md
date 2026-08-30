@@ -118,6 +118,7 @@ banwall apply -m ssh       nur ein Modul anwenden
 banwall status             Ist-Zustand aller Module
 banwall rollback           alle Änderungen zurücknehmen
 banwall blocklist-update   Blocklisten sofort aktualisieren
+banwall update             Banwall selbst aktualisieren
 ```
 
 ## Was Banwall einrichtet
@@ -196,6 +197,42 @@ echte Kundenanschluss.
 > Verzögerung. Bitte nicht ohne Grund auf stündlich stellen.
 >
 > Ist eine Quelle nicht erreichbar, behält Banwall den zuletzt geladenen Stand.
+
+## Banwall aktualisieren
+
+```bash
+sudo banwall update --dry-run   # zeigt, welche Dateien sich ändern würden
+sudo banwall update             # holt den neuen Stand und baut ihn ein
+```
+
+Geholt wird der aktuelle Stand des Standardbranches von GitHub; die Quelle
+steht als `BANWALL_UPDATE_URL` in der Konfiguration und lässt sich auf einen
+Fork umbiegen.
+
+Der Befehl tauscht **nur die Programmdateien** aus. Am System ändert sich
+dadurch nichts — dafür ist wie bei der Erstinstallation ein eigener Schritt
+nötig:
+
+```bash
+sudo banwall apply --dry-run
+sudo banwall apply
+```
+
+Automatisch läuft das nie, und es gibt bewusst keinen Timer dafür. Ein
+Werkzeug, das Firewall und SSH-Zugang verwaltet, soll sich nicht in dem
+Moment selbst austauschen, in dem niemand hinsieht.
+
+Vor dem Einbau prüft Banwall den geholten Stand: alle Pflichtdateien
+vorhanden, jedes Skript syntaktisch fehlerfrei, eine Versionskennung in
+`bin/banwall`. Fällt eine dieser Prüfungen durch, bleibt die Installation
+unangetastet. Der bisherige Stand wird vorher nach
+`/var/lib/banwall/updates/<Zeitstempel>/` gesichert.
+
+> [!NOTE]
+> Der Download ist HTTPS-gesichert, aber nicht signiert. Das Vertrauen endet
+> bei GitHub und der eingetragenen URL. Wer aus einem Git-Checkout arbeitet,
+> aktualisiert dort mit `git pull` — `banwall update` verweigert in dem Fall
+> die Arbeit, statt in den Arbeitsbaum zu installieren.
 
 ## Danke
 
