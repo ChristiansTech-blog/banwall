@@ -215,6 +215,12 @@ banwall_ssh_apply() {
 	banwall_run mkdir -p /etc/ssh/sshd_config.d
 	banwall_ssh_render | write_file "$BANWALL_SSHD_DROPIN" 0600
 
+	# 'sshd -t' verlangt das Privilege-Separation-Verzeichnis. Systemd
+	# legt es als RuntimeDirectory an - auf einem Server, auf dem sshd noch
+	# nie lief, fehlt es, und der Test scheitert dann an der Umgebung statt
+	# an der Konfiguration ("Missing privilege separation directory").
+	[[ -d /run/sshd ]] || banwall_run install -d -m 0755 /run/sshd
+
 	# Konfiguration testen, bevor sshd sie sieht. Ein 'reload' mit
 	# kaputter Config lässt den Dienst beim nächsten Start scheitern.
 	if ! is_dry_run; then

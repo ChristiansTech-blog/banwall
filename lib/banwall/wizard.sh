@@ -265,12 +265,17 @@ _wiz_systemcheck() {
 	((leer)) && printf '    (keine gefunden - ist "ss" installiert?)\n'
 
 	if ((WIZ_KEYS_OK == 0)); then
+		# Ohne sudo-Benutzer ist WIZ_SUDO_USER leer - dann muss im Beispiel
+		# ein sichtbarer Platzhalter stehen und kein blankes "@10.0.0.5".
+		local wer host
+		wer="${WIZ_SUDO_USER%% *}"
+		host="$(hostname -I 2>/dev/null | awk '{print $1}')"
 		_wiz_gefahr "Ohne hinterlegten SSH-Key kann Banwall den Passwort-Login nicht abschalten - das würde dich aussperren. Der Assistent lässt Passwort-Logins in diesem Fall an und weist später erneut darauf hin.
 
 So legst du einen Schlüssel an - in einem ZWEITEN Terminal auf deinem Arbeitsplatz, diese Sitzung offen lassen:
 
   ssh-keygen -t ed25519            # falls noch kein Schlüssel da ist
-  ssh-copy-id ${WIZ_SUDO_USER%% *}@$(hostname -I 2>/dev/null | awk '{print $1}')
+  ssh-copy-id ${wer:-<benutzer>}@${host:-<server>}
 
 Danach diesen Assistenten erneut starten: banwall setup"
 	fi

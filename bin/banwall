@@ -9,14 +9,25 @@ set -Eeuo pipefail
 
 BANWALL_VERSION="0.1.0"
 
-# Wurzel der Bibliothek: im installierten Zustand /usr/local/lib/banwall,
-# im Repository das lib/banwall/ neben diesem Skript. So läuft dasselbe
+# Wurzel der Bibliothek: im Repository das lib/banwall/ neben diesem
+# Skript, im installierten Zustand $PREFIX/lib/banwall. So läuft dasselbe
 # Skript aus dem Git-Checkout wie aus der Installation.
+#
+# Erkannt wird der Checkout an install.sh im Wurzelverzeichnis, nicht an
+# lib/banwall/: bei PREFIX=/usr/local gibt es /usr/local/lib/banwall auch
+# nach der Installation, und dann läge share/ eine Ebene zu hoch.
 _self="$(readlink -f "${BASH_SOURCE[0]}")"
 _self_dir="$(dirname "$_self")"
-if [[ -d "$_self_dir/../lib/banwall" ]]; then
-	BANWALL_LIB_DIR="$(readlink -f "$_self_dir/../lib/banwall")"
-	BANWALL_SHARE_DIR="$(readlink -f "$_self_dir/../share")"
+_root="$(dirname "$_self_dir")"
+if [[ -f "$_root/install.sh" && -d "$_root/lib/banwall" ]]; then
+	# Git-Checkout: share/ liegt direkt neben lib/.
+	BANWALL_LIB_DIR="$_root/lib/banwall"
+	BANWALL_SHARE_DIR="$_root/share"
+elif [[ -d "$_root/lib/banwall" ]]; then
+	# Installiert: $_root ist das Präfix. Abgeleitet statt fest verdrahtet,
+	# damit auch PREFIX=/opt oder $HOME/.local funktioniert.
+	BANWALL_LIB_DIR="$_root/lib/banwall"
+	BANWALL_SHARE_DIR="$_root/share/banwall"
 else
 	BANWALL_LIB_DIR="/usr/local/lib/banwall"
 	BANWALL_SHARE_DIR="/usr/local/share/banwall"
@@ -44,7 +55,7 @@ done
 # shellcheck source=../lib/banwall/wizard.sh
 source "$BANWALL_LIB_DIR/wizard.sh"
 
-unset _mod _self _self_dir
+unset _mod _self _self_dir _root
 
 usage() {
 	cat <<'USAGE'

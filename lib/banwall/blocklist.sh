@@ -192,11 +192,29 @@ _bl_load_v6() {
 # banwall_blocklist_refresh - ein kompletter Aktualisierungslauf.
 # Wird sowohl von 'banwall blocklist-update' als auch vom Timer gerufen.
 banwall_blocklist_refresh() {
-	require_cmd curl "Erst 'banwall apply -m blocklist' - das installiert es."
-	require_cmd nft "Erst 'banwall apply -m nftables' - das installiert es."
+	# Im Trockenlauf ist curl noch nicht installiert und die
+	# nftables-Tabelle noch nicht angelegt, weil vorher nichts wirklich
+	# angewendet wurde. Hier zu sterben hiesse, den Trockenlauf genau dort
+	# scheitern zu lassen, wo der echte Lauf durchliefe.
+	if is_dry_run; then
+		local fehlt=()
+		command -v curl >/dev/null 2>&1 || fehlt+=("curl")
+		command -v nft >/dev/null 2>&1 || fehlt+=("nft")
+		nft list table inet "$BANWALL_NFT_TABLE" >/dev/null 2>&1 ||
+			fehlt+=("die nftables-Tabelle '$BANWALL_NFT_TABLE'")
+		if ((${#fehlt[@]})); then
+			local liste
+			liste="$(printf '%s, ' "${fehlt[@]}")"
+			log_warn "Trockenlauf: ${liste%, } noch nicht vorhanden - der echte Lauf legt das an."
+			return 0
+		fi
+	else
+		require_cmd curl "Erst 'banwall apply -m blocklist' - das installiert es."
+		require_cmd nft "Erst 'banwall apply -m nftables' - das installiert es."
 
-	nft list table inet "$BANWALL_NFT_TABLE" >/dev/null 2>&1 ||
-		die 3 "nftables-Tabelle '$BANWALL_NFT_TABLE' fehlt. Erst 'banwall apply -m nftables'."
+		nft list table inet "$BANWALL_NFT_TABLE" >/dev/null 2>&1 ||
+			die 3 "nftables-Tabelle '$BANWALL_NFT_TABLE' fehlt. Erst 'banwall apply -m nftables'."
+	fi
 
 	mkdir -p "$BANWALL_BL_DIR"
 	chmod 700 "$BANWALL_BL_DIR"

@@ -165,3 +165,19 @@ setup() {
 	[ "$status" -eq 0 ]
 	stub_called "nft flush set inet banwall blocklist6"
 }
+
+@test "Trockenlauf bricht nicht ab, wenn die nftables-Tabelle noch fehlt" {
+	# Beim ersten 'banwall apply --dry-run' auf einem frischen Server gibt
+	# es weder curl noch die Tabelle - dort zu sterben hiesse, den
+	# Trockenlauf genau da scheitern zu lassen, wo der echte Lauf liefe.
+	export BANWALL_DRY_RUN=1 STUB_NFT_RC=1
+	run banwall_blocklist_refresh
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"Trockenlauf"* ]]
+}
+
+@test "im echten Lauf ist die fehlende Tabelle ein Abbruch" {
+	export STUB_NFT_RC=1
+	run banwall_blocklist_refresh
+	[ "$status" -eq 3 ]
+}
