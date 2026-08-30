@@ -159,7 +159,7 @@ banwall_ssh_apply() {
 	fi
 
 	backup_file "$BANWALL_SSHD_DROPIN"
-	run mkdir -p /etc/ssh/sshd_config.d
+	banwall_run mkdir -p /etc/ssh/sshd_config.d
 	banwall_ssh_render | write_file "$BANWALL_SSHD_DROPIN" 0600
 
 	# Konfiguration testen, bevor sshd sie sieht. Ein 'reload' mit
@@ -181,18 +181,18 @@ banwall_ssh_apply() {
 	if systemctl is-enabled ssh.socket >/dev/null 2>&1; then
 		if [[ "$BANWALL_SSH_PORT" != "22" ]]; then
 			backup_file /etc/systemd/system/ssh.socket.d/banwall-port.conf
-			run mkdir -p /etc/systemd/system/ssh.socket.d
+			banwall_run mkdir -p /etc/systemd/system/ssh.socket.d
 			printf '[Socket]\nListenStream=\nListenStream=%s\n' "$BANWALL_SSH_PORT" |
 				write_file /etc/systemd/system/ssh.socket.d/banwall-port.conf 0644
-			run systemctl daemon-reload
-			run systemctl restart ssh.socket
+			banwall_run systemctl daemon-reload
+			banwall_run systemctl restart ssh.socket
 		fi
 	fi
 
 	# reload, nicht restart: bestehende Sitzungen überleben. Falls die
 	# neue Konfiguration doch nicht passt, bleibt das Terminal offen.
-	run systemctl reload ssh 2>/dev/null ||
-		run systemctl reload sshd 2>/dev/null ||
+	banwall_run systemctl reload ssh 2>/dev/null ||
+		banwall_run systemctl reload sshd 2>/dev/null ||
 		{ log_error "sshd ließ sich nicht neu laden."; return 1; }
 
 	log_ok "SSH gehärtet (Port $BANWALL_SSH_PORT, Root-Login: $BANWALL_SSH_PERMIT_ROOT, Passwort: $BANWALL_SSH_PASSWORD_AUTH)"
@@ -216,9 +216,9 @@ banwall_ssh_status() {
 
 banwall_ssh_rollback() {
 	[[ -f "$BANWALL_SSHD_DROPIN" ]] || return 0
-	run rm -f "$BANWALL_SSHD_DROPIN"
-	run rm -f /etc/systemd/system/ssh.socket.d/banwall-port.conf
-	run systemctl daemon-reload
-	run systemctl reload ssh 2>/dev/null || run systemctl reload sshd 2>/dev/null || true
+	banwall_run rm -f "$BANWALL_SSHD_DROPIN"
+	banwall_run rm -f /etc/systemd/system/ssh.socket.d/banwall-port.conf
+	banwall_run systemctl daemon-reload
+	banwall_run systemctl reload ssh 2>/dev/null || banwall_run systemctl reload sshd 2>/dev/null || true
 	log_ok "SSH-Hardening zurückgenommen."
 }

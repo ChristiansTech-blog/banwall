@@ -48,11 +48,15 @@ die() {
 
 is_dry_run() { ((BANWALL_DRY_RUN)); }
 
-# run KOMMANDO [ARGS...]
+# banwall_run KOMMANDO [ARGS...]
 # Einziger erlaubter Weg, das System zu verändern. Im Trockenlauf wird das
 # Kommando nur ausgegeben. Dadurch braucht kein Modul eine zweite Code-
 # Variante für --dry-run, und es kann auch keine vergessen werden.
-run() {
+#
+# Heißt bewusst nicht 'run': bats bringt ein eigenes run() mit, und ein
+# gesourctes common.sh würde es überschreiben - dann wäre $status in
+# jedem Test leer.
+banwall_run() {
 	if is_dry_run; then
 		printf '%s  [dry-run] %s%s\n' "$_C_DIM" "$*" "$_C_RST" >&2
 		return 0
@@ -128,15 +132,15 @@ pkg_install() {
 	((${#missing[@]})) || { log_debug "Pakete bereits installiert: $*"; return 0; }
 
 	log_info "Installiere: ${missing[*]}"
-	run env DEBIAN_FRONTEND=noninteractive apt-get update -qq ||
+	banwall_run env DEBIAN_FRONTEND=noninteractive apt-get update -qq ||
 		die 1 "'apt-get update' fehlgeschlagen. Netzwerk oder Paketquellen prüfen."
-	run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" ||
+	banwall_run env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" ||
 		die 1 "Installation fehlgeschlagen: ${missing[*]}"
 }
 
 # service_enable DIENST - aktivieren und starten, idempotent.
 service_enable() {
-	run systemctl enable --now "$1" ||
+	banwall_run systemctl enable --now "$1" ||
 		die 1 "Dienst '$1' ließ sich nicht aktivieren. 'systemctl status $1' zeigt mehr."
 }
 

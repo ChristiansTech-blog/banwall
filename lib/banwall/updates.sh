@@ -56,7 +56,7 @@ banwall_updates_apply() {
 	fi
 
 	service_enable unattended-upgrades
-	run systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
+	banwall_run systemctl enable --now apt-daily.timer apt-daily-upgrade.timer
 
 	log_ok "Automatische Sicherheitsupdates aktiv$( ((BANWALL_UPDATES_AUTOREBOOT)) && printf ' (Neustart um %s erlaubt)' "$BANWALL_UPDATES_REBOOT_TIME")"
 }
@@ -74,6 +74,6 @@ banwall_updates_status() {
 
 banwall_updates_rollback() {
 	[[ -f "$BANWALL_UU_FILE" ]] || return 0
-	run rm -f "$BANWALL_UU_FILE"
+	banwall_run rm -f "$BANWALL_UU_FILE"
 	log_ok "Konfiguration für automatische Updates entfernt."
 }

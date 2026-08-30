@@ -61,7 +61,7 @@ banwall_fail2ban_apply() {
 	pkg_install fail2ban python3-systemd
 
 	backup_file "$BANWALL_F2B_JAIL"
-	run mkdir -p /etc/fail2ban/jail.d
+	banwall_run mkdir -p /etc/fail2ban/jail.d
 	banwall_fail2ban_render | write_file "$BANWALL_F2B_JAIL" 0644
 
 	if ! is_dry_run; then
@@ -75,7 +75,7 @@ banwall_fail2ban_apply() {
 	fi
 
 	service_enable fail2ban
-	run systemctl reload fail2ban 2>/dev/null || true
+	banwall_run systemctl reload fail2ban 2>/dev/null || true
 
 	log_ok "fail2ban aktiv (sshd, ${BANWALL_F2B_MAXRETRY} Versuche in ${BANWALL_F2B_FINDTIME}, Sperre ${BANWALL_F2B_BANTIME})"
 }
@@ -100,7 +100,7 @@ banwall_fail2ban_status() {
 
 banwall_fail2ban_rollback() {
 	[[ -f "$BANWALL_F2B_JAIL" ]] || return 0
-	run rm -f "$BANWALL_F2B_JAIL"
-	run systemctl reload fail2ban 2>/dev/null || true
+	banwall_run rm -f "$BANWALL_F2B_JAIL"
+	banwall_run systemctl reload fail2ban 2>/dev/null || true
 	log_ok "fail2ban-Jail von Banwall entfernt."
 }

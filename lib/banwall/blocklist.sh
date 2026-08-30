@@ -49,9 +49,19 @@ _bl_local_addresses() {
 # Akzeptiert die verbreiteten Formate (reine IPs, CIDR, Zeilen mit
 # angehängtem Kommentar) und verwirft alles andere kommentarlos.
 _bl_parse() {
-	local family="$1" v4 v6
-	v4='([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?'
-	v6='[0-9a-fA-F:]{2,}:[0-9a-fA-F:]*(/[0-9]{1,3})?'
+	local family="$1" v4 v6 oktett praefix4
+
+	# Die Oktette müssen einzeln auf 0-255 geprüft werden. Ein simples
+	# [0-9]{1,3} hält '999.1.1.1' für gültig - nftables lehnt so einen
+	# Eintrag ab und der ganze Block schlägt fehl.
+	oktett='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+	praefix4='(3[0-2]|[12]?[0-9])'
+	v4="($oktett\.){3}$oktett(/$praefix4)?"
+
+	# Für IPv6 wäre eine vollständige Prüfung unverhältnismäßig lang.
+	# Geprüft wird die Grundform und die Präfixlänge 0-128; alles
+	# Weitere fängt nftables ab, ohne dass ein Block dabei verloren geht.
+	v6='[0-9a-fA-F:]{2,}:[0-9a-fA-F:]*(/(12[0-8]|1[01][0-9]|[1-9]?[0-9]))?'
 
 	# Kommentare ab # oder ; abschneiden, dann erstes Feld nehmen.
 	sed -e 's/[#;].*$//' -e 's/\r$//' |
@@ -117,7 +127,7 @@ _bl_nft_batch() {
 	split -l "$_BANWALL_BL_CHUNK" "$datei" "$chunkdir/teil-"
 
 	for f in "$chunkdir"/teil-*; do
-		if ! run nft "$aktion" element inet "$BANWALL_NFT_TABLE" "$set_name" \
+		if ! banwall_run nft "$aktion" element inet "$BANWALL_NFT_TABLE" "$set_name" \
 			"{ $(paste -sd, - <"$f") }"; then
 			fehler=$((fehler + 1))
 		fi
@@ -147,7 +157,7 @@ _bl_load_v4() {
 
 	if [[ ! -s "$alt" ]]; then
 		# Erster Lauf oder verlorener Stand: sauber von vorn.
-		run nft flush set inet "$BANWALL_NFT_TABLE" blocklist4 || return 1
+		banwall_run nft flush set inet "$BANWALL_NFT_TABLE" blocklist4 || return 1
 		_bl_nft_batch add blocklist4 "$neu" || return 1
 		return 0
 	fi
@@ -174,7 +184,7 @@ _bl_load_v4() {
 # gängiger Listen sind klein genug, dass das in eine Transaktion passt.
 _bl_load_v6() {
 	local neu="$1"
-	run nft flush set inet "$BANWALL_NFT_TABLE" blocklist6 || return 1
+	banwall_run nft flush set inet "$BANWALL_NFT_TABLE" blocklist6 || return 1
 	_bl_nft_batch add blocklist6 "$neu" || return 1
 	return 0
 }
@@ -293,7 +303,7 @@ banwall_blocklist_apply() {
 	write_file "/etc/systemd/system/$BANWALL_BL_SERVICE" 0644 \
 		<"$BANWALL_SHARE_DIR/systemd/$BANWALL_BL_SERVICE"
 
-	run systemctl daemon-reload
+	banwall_run systemctl daemon-reload
 	service_enable "$BANWALL_BL_TIMER"
 
 	# Einmal sofort laden, damit der Schutz nicht erst beim ersten
@@ -317,15 +327,15 @@ banwall_blocklist_status() {
 }
 
 banwall_blocklist_rollback() {
-	run systemctl disable --now "$BANWALL_BL_TIMER" 2>/dev/null || true
-	run rm -f "/etc/systemd/system/$BANWALL_BL_TIMER" \
+	banwall_run systemctl disable --now "$BANWALL_BL_TIMER" 2>/dev/null || true
+	banwall_run rm -f "/etc/systemd/system/$BANWALL_BL_TIMER" \
 		"/etc/systemd/system/$BANWALL_BL_SERVICE"
-	run systemctl daemon-reload
+	banwall_run systemctl daemon-reload
 
 	# Sets leeren, falls die Tabelle noch steht (etwa bei -m blocklist).
 	if nft list table inet "$BANWALL_NFT_TABLE" >/dev/null 2>&1; then
-		run nft flush set inet "$BANWALL_NFT_TABLE" blocklist4 2>/dev/null || true
-		run nft flush set inet "$BANWALL_NFT_TABLE" blocklist6 2>/dev/null || true
+		banwall_run nft flush set inet "$BANWALL_NFT_TABLE" blocklist4 2>/dev/null || true
+		banwall_run nft flush set inet "$BANWALL_NFT_TABLE" blocklist6 2>/dev/null || true
 	fi
 	log_ok "Blocklist-Timer entfernt und Sets geleert."
 }

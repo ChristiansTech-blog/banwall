@@ -11,21 +11,48 @@ setup() {
 }
 
 @test "erkennt IPv4-Adressen und CIDR-Präfixe" {
-	run bash -c 'printf "192.0.2.1\n198.51.100.0/24\n" | _bl_parse 4'
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"192.0.2.1"* ]]
-	[[ "$output" == *"198.51.100.0/24"* ]]
+	# Kein 'run bash -c': das startet eine neue Shell ohne die hier
+	# gesourcten Funktionen. Die Pipeline läuft direkt im Test.
+	local ergebnis
+	ergebnis="$(printf '192.0.2.1\n198.51.100.0/24\n' | _bl_parse 4)"
+	[[ "$ergebnis" == *"192.0.2.1"* ]]
+	[[ "$ergebnis" == *"198.51.100.0/24"* ]]
 }
 
 @test "verwirft Müll und Hostnamen" {
-	result="$(printf 'kein-eintrag\nexample.org\n999.1.1.1\n\n' | _bl_parse 4 || true)"
-	[ -z "$result" ]
+	local ergebnis
+	ergebnis="$(printf 'kein-eintrag\nexample.org\n999.1.1.1\n\n' | _bl_parse 4 || true)"
+	[ -z "$ergebnis" ]
+}
+
+@test "verwirft Adressen mit Oktetten über 255" {
+	# Ein simples [0-9]{1,3} hielte '999.1.1.1' für gültig. nftables
+	# lehnt so einen Eintrag ab - und mit ihm den ganzen Block, in dem
+	# er steckt.
+	local ergebnis
+	ergebnis="$(printf '999.1.1.1\n256.1.1.1\n10.0.0.300\n1.2.3.4.5\n' | _bl_parse 4 || true)"
+	[ -z "$ergebnis" ]
+}
+
+@test "verwirft unmögliche Präfixlängen" {
+	local v4 v6
+	v4="$(printf '192.0.2.1/33\n' | _bl_parse 4 || true)"
+	v6="$(printf '2001:db8::1/129\n' | _bl_parse 6 || true)"
+	[ -z "$v4" ]
+	[ -z "$v6" ]
+}
+
+@test "Randwerte bleiben gültig" {
+	local ergebnis
+	ergebnis="$(printf '0.0.0.0/0\n255.255.255.255\n192.0.2.1/32\n' | _bl_parse 4)"
+	[ "$(wc -l <<<"$ergebnis")" -eq 3 ]
 }
 
 @test "schneidet Kommentare ab" {
-	run bash -c 'printf "192.0.2.1 # bekannter Scanner\n; 198.51.100.5\n" | _bl_parse 4'
-	[[ "$output" == *"192.0.2.1"* ]]
-	[[ "$output" != *"#"* ]]
+	local ergebnis
+	ergebnis="$(printf '192.0.2.1 # bekannter Scanner\n; 198.51.100.5\n' | _bl_parse 4)"
+	[[ "$ergebnis" == *"192.0.2.1"* ]]
+	[[ "$ergebnis" != *"#"* ]]
 }
 
 @test "trennt IPv6 von IPv4" {
@@ -55,17 +82,19 @@ setup() {
 
 @test "IPv64-Format wird vollständig erkannt" {
 	# Auszug im Originalformat: reine /32-Präfixe, LF, keine Kommentare.
-	run bash -c 'printf "192.0.2.10/32\n192.0.2.11/32\n2600:3c00::2000:25ff:fecd:617a/64\n" | _bl_parse 4'
-	[ "${#lines[@]}" -eq 2 ]
-	[[ "$output" == *"192.0.2.10/32"* ]]
+	local ergebnis
+	ergebnis="$(printf '192.0.2.10/32\n192.0.2.11/32\n2600:3c00::2000:25ff:fecd:617a/64\n' | _bl_parse 4)"
+	[ "$(wc -l <<<"$ergebnis")" -eq 2 ]
+	[[ "$ergebnis" == *"192.0.2.10/32"* ]]
 }
 
 @test "IPv6 mit gesetzten Host-Bits wird nicht verworfen" {
 	# 61 der 62 IPv6-Einträge bei IPv64 sehen so aus. nftables
 	# normalisiert sie beim Einfügen selbst - der Parser darf sie also
 	# nicht vorher aussortieren.
-	run bash -c 'printf "2001:16b8:b1af:d600:b5c8:12ae:b33:9fa4/64\n" | _bl_parse 6'
-	[ "$output" = "2001:16b8:b1af:d600:b5c8:12ae:b33:9fa4/64" ]
+	local ergebnis
+	ergebnis="$(printf '2001:16b8:b1af:d600:b5c8:12ae:b33:9fa4/64\n' | _bl_parse 6)"
+	[ "$ergebnis" = "2001:16b8:b1af:d600:b5c8:12ae:b33:9fa4/64" ]
 }
 
 # --- blockweises Laden ---------------------------------------------------

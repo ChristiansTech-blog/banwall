@@ -78,8 +78,9 @@ wiz_werte() {
 	WIZ_SSH_ALLOW_USERS="admin deploy"
 	WIZ_ALLOW_NETS="203.0.113.0/24 2001:db8::/32"
 	_wiz_schreiben
-	run config_load
-	[ "$status" -eq 0 ]
+	# Direkt aufrufen, nicht über 'run': dessen Subshell würde die
+	# geladenen Werte nicht in den Test zurückgeben.
+	config_load
 	[ "$BANWALL_SSH_ALLOW_USERS" = "admin deploy" ]
 	[ "$BANWALL_ALLOW_NETS" = "203.0.113.0/24 2001:db8::/32" ]
 }
@@ -115,8 +116,7 @@ wiz_werte() {
 	WIZ_ENABLE_BLOCKLIST=0
 	WIZ_BLOCKLIST_URLS=""
 	_wiz_schreiben
-	run config_load
-	[ "$status" -eq 0 ]
+	config_load
 	run config_module_enabled fail2ban
 	[ "$status" -ne 0 ]
 	run config_module_enabled blocklist

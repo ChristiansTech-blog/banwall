@@ -9,7 +9,7 @@ setup() { setup_banwall; }
 
 @test "run() führt im Trockenlauf nichts aus" {
 	BANWALL_DRY_RUN=1
-	run run nft list ruleset
+	run banwall_run nft list ruleset
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"[dry-run]"* ]]
 	! stub_called "nft list ruleset"
@@ -17,7 +17,7 @@ setup() { setup_banwall; }
 
 @test "run() führt außerhalb des Trockenlaufs aus" {
 	BANWALL_DRY_RUN=0
-	run run nft list ruleset
+	run banwall_run nft list ruleset
 	[ "$status" -eq 0 ]
 	stub_called "nft list ruleset"
 }

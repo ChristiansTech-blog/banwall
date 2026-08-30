@@ -223,7 +223,7 @@ make test     # Unit-Tests (bats, ohne root)
 
 Drei Regeln, an denen der Rest hängt:
 
-1. **Alles Verändernde läuft durch `run()`** bzw. `write_file` — daran hängt
+1. **Alles Verändernde läuft durch `banwall_run()`** bzw. `write_file` — daran hängt
    `--dry-run`. Wer daran vorbei arbeitet, macht den Trockenlauf zur Lüge.
 2. **Vor der ersten Änderung an einer Datei steht `backup_file`** — sonst kann
    `banwall rollback` sie nicht wiederherstellen.

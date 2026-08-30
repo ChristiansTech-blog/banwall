@@ -127,7 +127,7 @@ banwall_nftables_apply() {
 
 	# Regeln laden. nft -f ist für eine Tabelle atomar: entweder das
 	# gesamte Regelwerk gilt oder das alte bleibt stehen.
-	run nft --file "$BANWALL_NFT_FILE" ||
+	banwall_run nft --file "$BANWALL_NFT_FILE" ||
 		{ log_error "Regelwerk ließ sich nicht laden."; return 1; }
 
 	# Persistenz über nftables.service. Statt die Regeln in
@@ -179,7 +179,7 @@ banwall_nftables_status() {
 banwall_nftables_rollback() {
 	command -v nft >/dev/null 2>&1 || return 0
 	if nft list table inet "$BANWALL_NFT_TABLE" >/dev/null 2>&1; then
-		run nft delete table inet "$BANWALL_NFT_TABLE"
+		banwall_run nft delete table inet "$BANWALL_NFT_TABLE"
 		log_ok "Tabelle inet $BANWALL_NFT_TABLE entfernt."
 	fi
 	# /etc/nftables.conf und /etc/banwall/nftables.nft stellt

@@ -74,10 +74,10 @@ backup_restore_files() {
 		[[ -n "$path" ]] || continue
 		case "$kind" in
 		FILE)
-			run cp -a "$dir/files$path" "$path" && restored=$((restored + 1))
+			banwall_run cp -a "$dir/files$path" "$path" && restored=$((restored + 1))
 			;;
 		ABSENT)
-			[[ -e "$path" ]] && run rm -f "$path" && removed=$((removed + 1))
+			[[ -e "$path" ]] && banwall_run rm -f "$path" && removed=$((removed + 1))
 			;;
 		esac
 	done <"$dir/manifest"

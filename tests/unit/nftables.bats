@@ -42,6 +42,13 @@ setup() {
 	if ! command -v /usr/sbin/nft >/dev/null 2>&1; then
 		skip "nft nicht installiert"
 	fi
+	# 'nft --check' liest den Kernel-Regelsatz und braucht dafür
+	# CAP_NET_ADMIN. Ohne diese Berechtigung - etwa im CI-Container -
+	# scheitert es an der Umgebung, nicht am Regelwerk. Der CI-Job
+	# 'nftables-Regelwerk' deckt diese Prüfung mit sudo ab.
+	if ! /usr/sbin/nft list ruleset >/dev/null 2>&1; then
+		skip "keine Berechtigung für nft (CAP_NET_ADMIN fehlt)"
+	fi
 	BANWALL_TCP_PORTS="22 80 443"
 	banwall_nftables_render >"$BATS_TEST_TMPDIR/rules.nft"
 	run /usr/sbin/nft --check --file "$BATS_TEST_TMPDIR/rules.nft"
