@@ -1,0 +1,20 @@
+[Unit]
+Description=Banwall: IP-Blocklisten regelmäßig aktualisieren
+Documentation=https://github.com/ChristiansTech-blog/banwall
+
+[Timer]
+OnCalendar=@INTERVAL@
+
+# Zufällige Verzögerung: sonst schlagen alle Banwall-Installationen
+# weltweit zur selben Sekunde bei denselben Listenanbietern auf.
+RandomizedDelaySec=30m
+
+# War der Server zum Zeitpunkt aus, wird sofort nach dem Start geholt.
+Persistent=true
+
+# Kurz nach dem Boot einmal laufen - frisch gestartete Server haben oft
+# eine veraltete Liste.
+OnBootSec=5min
+
+[Install]
+WantedBy=timers.target

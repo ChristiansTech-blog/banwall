@@ -1,0 +1,40 @@
+[Unit]
+Description=Banwall: IP-Blocklisten aktualisieren
+Documentation=https://github.com/ChristiansTech-blog/banwall
+# Ohne Netzwerk kann nichts geholt werden, und ohne die nftables-Tabelle
+# gibt es kein Set, in das geladen werden könnte.
+After=network-online.target nftables.service
+Wants=network-online.target
+Requires=nftables.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/banwall blocklist-update
+
+# Fehlschläge sind normal (Quelle offline). Der Timer versucht es
+# später erneut; ein sofortiger Restart würde nur Last erzeugen.
+SuccessExitStatus=0
+TimeoutStartSec=300
+
+# Der Dienst holt Daten aus dem Internet und schreibt sie in die
+# Kernel-Firewall - er bekommt genau die Rechte, die er dafür braucht.
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/banwall
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_NETLINK AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

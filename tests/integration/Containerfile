@@ -1,0 +1,34 @@
+# Wegwerf-Debian-13 für die Integrationstests.
+#
+# systemd läuft als PID 1, weil Banwall systemctl aufruft. Mit podman
+# genügt dafür --systemd=always; unter Docker braucht es zusätzlich
+# den cgroup-Mount (siehe run.sh).
+FROM debian:trixie
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV container=podman
+
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+	systemd systemd-sysv dbus \
+	nftables openssh-server openssh-client sudo curl ca-certificates \
+	bats shellcheck \
+	&& apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Getty und andere Units, die im Container nur Fehler produzieren.
+RUN systemctl mask \
+	getty.target console-getty.service systemd-logind.service \
+	systemd-udevd.service systemd-networkd.service 2>/dev/null || true
+
+# Testbenutzer mit sudo-Rechten und hinterlegtem Key - genau die Lage,
+# die der Aussperr-Schutz verlangt.
+RUN useradd -m -s /bin/bash admin && usermod -aG sudo admin \
+	&& mkdir -p /home/admin/.ssh \
+	&& ssh-keygen -t ed25519 -N '' -f /home/admin/.ssh/id_ed25519 -C test \
+	&& cp /home/admin/.ssh/id_ed25519.pub /home/admin/.ssh/authorized_keys \
+	&& chown -R admin:admin /home/admin/.ssh \
+	&& chmod 700 /home/admin/.ssh && chmod 600 /home/admin/.ssh/authorized_keys
+
+COPY . /opt/banwall
+WORKDIR /opt/banwall
+
+CMD ["/lib/systemd/systemd"]

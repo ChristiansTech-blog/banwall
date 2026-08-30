@@ -1,0 +1,119 @@
+# /etc/banwall/banwall.conf
+#
+# Konfiguration von Banwall. Die Datei wird als root gelesen und muss
+# root gehören sowie 0600 haben, sonst verweigert Banwall den Start.
+#
+#   install -m 600 -o root -g root banwall.conf.example /etc/banwall/banwall.conf
+#
+# Alle Werte hier sind die eingebauten Standardwerte. Auskommentierte
+# Zeilen ändern nichts - es genügt, das zu setzen, was abweicht.
+
+# --- Module ------------------------------------------------------------
+# Jeder Schritt ist einzeln schaltbar. 1 = an, 0 = aus.
+
+BANWALL_ENABLE_NFTABLES=1
+BANWALL_ENABLE_FAIL2BAN=1
+BANWALL_ENABLE_SSH=1
+BANWALL_ENABLE_UPDATES=1
+
+BANWALL_ENABLE_BLOCKLIST=1
+
+# --- Firewall ----------------------------------------------------------
+
+# Eingehend erlaubte Ports, durch Leerzeichen getrennt.
+# Der SSH-Port MUSS hier stehen, sonst bricht Banwall ab.
+#   Webserver:  BANWALL_TCP_PORTS="22 80 443"
+BANWALL_TCP_PORTS="22"
+
+# Eingehend erlaubte UDP-Ports, z. B. "51820" für WireGuard.
+BANWALL_UDP_PORTS=""
+
+# Auf Ping antworten. Aus wirkt wie Tarnung, ist aber keine: Scanner
+# finden den Server trotzdem, und Monitoring wird unnötig schwierig.
+BANWALL_ALLOW_PING=1
+
+# Netze mit vollem Zugang - Büroanschluss, VPN, Monitoring. Diese Netze
+# umgehen die Portfilterung und werden von fail2ban nie gesperrt.
+# Nur eintragen, was du wirklich kontrollierst.
+#   BANWALL_ALLOW_NETS="203.0.113.0/24 2001:db8::/32"
+BANWALL_ALLOW_NETS=""
+
+# Neue SSH-Verbindungen auf 10/Minute begrenzen.
+BANWALL_SSH_RATE_LIMIT=1
+
+# --- SSH ---------------------------------------------------------------
+# Achtung: Banwall bricht ab (Exit-Code 4), solange kein Nicht-Root-User
+# mit sudo-Rechten einen funktionierenden SSH-Key hat. Das ist Absicht.
+
+BANWALL_SSH_PORT="22"
+
+# no | prohibit-password | yes
+BANWALL_SSH_PERMIT_ROOT="no"
+
+# yes | no
+BANWALL_SSH_PASSWORD_AUTH="no"
+
+# Wenn gesetzt, dürfen sich nur diese Benutzer anmelden.
+#   BANWALL_SSH_ALLOW_USERS="admin deploy"
+BANWALL_SSH_ALLOW_USERS=""
+
+# --- fail2ban ----------------------------------------------------------
+
+BANWALL_F2B_BANTIME="1h"
+BANWALL_F2B_FINDTIME="10m"
+BANWALL_F2B_MAXRETRY="5"
+
+# Zusätzliche Jails für nginx und Apache. Nur sinnvoll, wenn ein
+# Webserver läuft - sonst meldet fail2ban fehlende Logdateien.
+BANWALL_F2B_WEBSERVER=0
+
+# --- Automatische Updates ----------------------------------------------
+# Es werden ausschließlich Security-Updates eingespielt.
+
+# Neustart erlauben, wenn ein Update ihn erfordert (z. B. Kernel).
+# Aus heißt: der Server läuft mit dem alten Kernel weiter, bis du
+# selbst neu startest. 'ls /var/run/reboot-required' zeigt es an.
+BANWALL_UPDATES_AUTOREBOOT=0
+BANWALL_UPDATES_REBOOT_TIME="04:00"
+
+# --- Blocklisten -------------------------------------------------------
+# Quellen für IP-Blocklisten, durch Leerzeichen getrennt. Nur https.
+#
+# Voreingestellt ist die von IPv64.net aufbereitete Fassung der
+# blocklist.de-Liste: Adressen, die durch SSH-, Mail- oder Web-Angriffe
+# auffällig geworden sind. Danke an IPv64.net für die Aufbereitung und
+# an blocklist.de als Originalquelle - siehe README, Abschnitt "Danke". Für einen frischen Server ist das die
+# passendste der drei IPv64-Listen, weil sie fast nur Einzeladressen
+# (/32) enthält und kaum Kollateralschaden verursacht.
+#
+# Die anderen beiden Listen von IPv64:
+#
+#   ipv64_blocklist_all.txt
+#     Alles zusammen, rund 32.700 Einträge, darunter ganze Netze bis /16.
+#     Mehr Schutz, aber auch mehr unbeteiligte Adressen im selben Netz.
+#
+#   ipv64_blocklist_spamhaus_drop.txt
+#     Spamhaus DROP: rund 1.500 Netze, die als vollständig
+#     missbräuchlich gelten. Klein, konservativ, gut zusätzlich.
+#
+# Beispiel für zwei Quellen gleichzeitig:
+#   BANWALL_BLOCKLIST_URLS="https://ipv64.net/blocklists/ipv64_blocklist_blocklistde_all.txt https://ipv64.net/blocklists/ipv64_blocklist_spamhaus_drop.txt"
+#
+# Was hier steht, entscheidet mit, wen dein Server aussperrt. Banwall
+# filtert eigene, private, Link-Local- und CGNAT-Adressen immer heraus
+# und lädt eine Liste nur, wenn nach dieser Prüfung noch Einträge übrig
+# sind. Gegen eine schlecht gepflegte Quelle hilft das nur begrenzt.
+BANWALL_BLOCKLIST_URLS="https://ipv64.net/blocklists/ipv64_blocklist_blocklistde_all.txt"
+
+# Wie oft aktualisiert wird. Beliebiger systemd-Kalenderausdruck.
+#   hourly | daily | weekly | "*-*-* 03:00:00"
+# IPv64 stellt die Listen kostenlos bereit und bittet darum, den Dienst
+# nicht zu überlasten. Täglich reicht für die meisten Server; kürzere
+# Intervalle nur mit gutem Grund.
+BANWALL_BLOCKLIST_INTERVAL="daily"
+
+# Notbremse gegen ausufernde Listen. Jeder Eintrag kostet Arbeitsspeicher.
+# Die IPv64-Listen liegen bei 26.000 bis 33.000 Einträgen.
+BANWALL_BLOCKLIST_MAX_ENTRIES=200000
+BANWALL_BLOCKLIST_MAX_BYTES=20971520
+BANWALL_BLOCKLIST_TIMEOUT=30

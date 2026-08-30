@@ -1,0 +1,39 @@
+# https://editorconfig.org
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Tabs in Shell-Skripten. Nicht Geschmackssache: nur mit Tabs
+# funktionieren Heredocs mit <<- , und davon lebt jede render()-Funktion.
+[*.{sh,bash,bats}]
+indent_style = tab
+indent_size = 4
+
+[bin/banwall]
+indent_style = tab
+indent_size = 4
+
+[install.sh]
+indent_style = tab
+indent_size = 4
+
+[Makefile]
+indent_style = tab
+
+# YAML verträgt keine Tabs.
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+[*.md]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false   # zwei Leerzeichen = Zeilenumbruch
+
+[*.{conf,nft,service,timer}]
+indent_style = tab
+indent_size = 4

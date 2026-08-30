@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+#
+# banwall - Sicherheitsgrundeinrichtung für frische Debian-13-Server.
+#
+# Einstiegspunkt der CLI. Enthält bewusst keine Fachlogik, sondern nur
+# Argument-Parsing und die Orchestrierung der Module aus lib/banwall/.
+
+set -Eeuo pipefail
+
+BANWALL_VERSION="0.1.0"
+
+# Wurzel der Bibliothek: im installierten Zustand /usr/local/lib/banwall,
+# im Repository das lib/banwall/ neben diesem Skript. So läuft dasselbe
+# Skript aus dem Git-Checkout wie aus der Installation.
+_self="$(readlink -f "${BASH_SOURCE[0]}")"
+_self_dir="$(dirname "$_self")"
+if [[ -d "$_self_dir/../lib/banwall" ]]; then
+	BANWALL_LIB_DIR="$(readlink -f "$_self_dir/../lib/banwall")"
+	BANWALL_SHARE_DIR="$(readlink -f "$_self_dir/../share")"
+else
+	BANWALL_LIB_DIR="/usr/local/lib/banwall"
+	BANWALL_SHARE_DIR="/usr/local/share/banwall"
+fi
+readonly BANWALL_VERSION BANWALL_LIB_DIR BANWALL_SHARE_DIR
+
+# shellcheck source=../lib/banwall/common.sh
+source "$BANWALL_LIB_DIR/common.sh"
+# shellcheck source=../lib/banwall/config.sh
+source "$BANWALL_LIB_DIR/config.sh"
+# shellcheck source=../lib/banwall/backup.sh
+source "$BANWALL_LIB_DIR/backup.sh"
+
+# Reihenfolge ist bedeutsam: SSH-Hardening läuft erst, wenn die Firewall
+# steht, und die Blocklist zuletzt, weil sie das nftables-Set voraussetzt.
+readonly BANWALL_MODULES=(nftables fail2ban ssh updates blocklist)
+
+for _mod in "${BANWALL_MODULES[@]}"; do
+	# shellcheck source=/dev/null
+	source "$BANWALL_LIB_DIR/$_mod.sh"
+done
+# Der Assistent kommt nach den Modulen: er benutzt die Key-Prüfung aus
+# ssh.sh und ruft am Ende cmd_apply aus diesem Skript.
+# shellcheck source=../lib/banwall/wizard.sh
+source "$BANWALL_LIB_DIR/wizard.sh"
+
+unset _mod _self _self_dir
+
+usage() {
+	cat <<'USAGE'
+Banwall - Sicherheitsgrundeinrichtung für frische Debian-13-Server
+
+  banwall <befehl> [optionen]
+
+Befehle:
+  setup              Geführte Einrichtung - stellt Fragen und schreibt
+                     die Konfiguration. Verändert das System nicht.
+  apply              Aktivierte Module anwenden (idempotent)
+  status             Ist-Zustand aller Module anzeigen
+  rollback           Änderungen aus den Backups zurücknehmen
+  blocklist-update   Blocklisten sofort neu laden (nutzt der Timer)
+  check              Konfiguration und Systemvoraussetzungen prüfen
+  version            Version ausgeben
+
+Optionen:
+  -n, --dry-run      Nur anzeigen, was passieren würde. Nichts ändern.
+  -c, --config PFAD  Alternative Konfigurationsdatei
+                     (Standard: /etc/banwall/banwall.conf)
+  -m, --module NAME  Nur dieses Modul ausführen, mehrfach erlaubt.
+                     Verfügbar: nftables fail2ban ssh updates blocklist
+  -y, --yes          Rückfragen automatisch bestätigen
+  -v, --verbose      Ausführliche Ausgabe
+  -h, --help         Diese Hilfe
+
+Beispiele:
+  banwall setup                     # geführte Einrichtung
+  banwall check                     # vor dem ersten Lauf
+  banwall apply --dry-run           # Trockenlauf, ändert nichts
+  banwall apply                     # anwenden
+  banwall apply -m ssh              # nur SSH-Hardening nachziehen
+  banwall rollback                  # zurück auf den Stand vor banwall
+USAGE
+}
+
+# Modulnamen, die dieser Lauf abarbeiten soll. Leer = alle, die in der
+# Konfiguration aktiviert sind.
+declare -a REQUESTED_MODULES=()
+
+# parse_args ARGUMENTE...
+# Setzt BANWALL_CMD und die Optionsvariablen. Bewusst KEINE Ausgabe auf
+# stdout: liefe die Funktion in einer Kommandosubstitution, würde ihr
+# 'exit' nur die Subshell beenden - 'banwall --help' hätte dann die
+# Hilfe als Befehlsnamen weitergereicht statt sich zu beenden.
+#
+# Optionen und Befehl dürfen in beliebiger Reihenfolge stehen:
+# 'banwall apply -n' und 'banwall -n apply' sind gleichwertig.
+parse_args() {
+	BANWALL_CMD=""
+
+	while (($# > 0)); do
+		case "$1" in
+		-n | --dry-run) BANWALL_DRY_RUN=1 ;;
+		-y | --yes) BANWALL_ASSUME_YES=1 ;;
+		-v | --verbose) BANWALL_VERBOSE=1 ;;
+		-h | --help)
+			usage
+			exit 0
+			;;
+		-c | --config)
+			[[ -n "${2:-}" ]] || die 2 "--config erwartet einen Pfad."
+			BANWALL_CONFIG_FILE="$2"
+			shift
+			;;
+		-m | --module)
+			[[ -n "${2:-}" ]] || die 2 "--module erwartet einen Modulnamen."
+			array_contains "$2" "${BANWALL_MODULES[@]}" ||
+				die 2 "Unbekanntes Modul '$2'. Verfügbar: ${BANWALL_MODULES[*]}"
+			REQUESTED_MODULES+=("$2")
+			shift
+			;;
+		--) shift ;;
+		-*) die 2 "Unbekannte Option '$1'. 'banwall --help' zeigt die Hilfe." ;;
+		*)
+			[[ -z "$BANWALL_CMD" ]] ||
+				die 2 "Mehr als ein Befehl angegeben ('$BANWALL_CMD' und '$1')."
+			BANWALL_CMD="$1"
+			;;
+		esac
+		shift
+	done
+
+	[[ -n "$BANWALL_CMD" ]] || { usage; exit 2; }
+}
+
+# Liefert die Module, die in diesem Lauf laufen sollen: entweder die per
+# --module erzwungenen oder alle per Konfiguration aktivierten.
+selected_modules() {
+	local mod
+	if ((${#REQUESTED_MODULES[@]} > 0)); then
+		printf '%s\n' "${REQUESTED_MODULES[@]}"
+		return
+	fi
+	for mod in "${BANWALL_MODULES[@]}"; do
+		config_module_enabled "$mod" && printf '%s\n' "$mod"
+	done
+}
+
+cmd_apply() {
+	local mod rc=0 applied=0
+	require_root
+	preflight_checks
+
+	log_info "Banwall $BANWALL_VERSION"
+	is_dry_run && log_warn "Trockenlauf - es wird nichts verändert."
+
+	backup_begin
+
+	while read -r mod; do
+		[[ -n "$mod" ]] || continue
+		log_step "Modul: $mod"
+		if "banwall_${mod}_apply"; then
+			applied=$((applied + 1))
+		else
+			rc=$?
+			log_error "Modul '$mod' ist mit Exit-Code $rc fehlgeschlagen."
+			log_error "Bereits angewendete Module bleiben aktiv." \
+				"'banwall rollback' nimmt sie zurück."
+			return "$rc"
+		fi
+	done < <(selected_modules)
+
+	((applied > 0)) || { log_warn "Kein Modul aktiviert - nichts zu tun."; return 0; }
+
+	backup_finish
+	log_ok "Fertig. $applied Modul(e) angewendet."
+	is_dry_run || log_info "Backup dieses Laufs: $(backup_current_dir)"
+	return 0
+}
+
+cmd_status() {
+	local mod
+	printf 'Banwall %s\n' "$BANWALL_VERSION"
+	printf 'Konfiguration: %s\n\n' "$BANWALL_CONFIG_FILE"
+	for mod in "${BANWALL_MODULES[@]}"; do
+		if config_module_enabled "$mod"; then
+			printf '%-12s [aktiviert]  ' "$mod"
+		else
+			printf '%-12s [aus]        ' "$mod"
+		fi
+		"banwall_${mod}_status" || true
+	done
+}
+
+cmd_rollback() {
+	require_root
+	local dir
+	dir="$(backup_latest_dir)" ||
+		die 1 "Kein Backup gefunden. Es gibt nichts zurückzunehmen."
+
+	log_warn "Rollback aus: $dir"
+	confirm "Änderungen von Banwall wirklich zurücknehmen?" || return 1
+
+	local mod
+	# Rückwärts, damit Abhängigkeiten in umgekehrter Reihenfolge fallen.
+	for ((i = ${#BANWALL_MODULES[@]} - 1; i >= 0; i--)); do
+		mod="${BANWALL_MODULES[$i]}"
+		log_step "Rollback: $mod"
+		"banwall_${mod}_rollback" || log_warn "Rollback von '$mod' unvollständig."
+	done
+
+	backup_restore_files "$dir"
+	log_ok "Rollback abgeschlossen. Ein Neustart wird empfohlen."
+}
+
+cmd_check() {
+	preflight_checks
+	config_validate
+	log_ok "Konfiguration und Systemvoraussetzungen sind in Ordnung."
+}
+
+main() {
+	local cmd
+	parse_args "$@"
+	cmd="$BANWALL_CMD"
+
+	case "$cmd" in
+	version) printf 'banwall %s\n' "$BANWALL_VERSION"; return 0 ;;
+	help) usage; return 0 ;;
+	esac
+
+	if [[ "$cmd" == "setup" ]]; then
+		# Bestehende Werte als Vorgabe laden, aber ohne Warnung: dass
+		# noch keine Konfiguration da ist, ist beim Einrichten normal.
+		config_load 2>/dev/null || true
+	else
+		config_load
+	fi
+
+	case "$cmd" in
+	setup) banwall_wizard_run ;;
+	apply) cmd_apply ;;
+	status) cmd_status ;;
+	rollback) cmd_rollback ;;
+	check) cmd_check ;;
+	blocklist-update) require_root; banwall_blocklist_refresh ;;
+	*) die 2 "Unbekannter Befehl '$cmd'. 'banwall --help' zeigt die Hilfe." ;;
+	esac
+}
+
+main "$@"

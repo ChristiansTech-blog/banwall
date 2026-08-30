@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Stub für 'systemd-analyze'. Protokolliert den Aufruf und verhält sich so, wie es
+# der Testfall über STUB_<KOMMANDO>_RC / _OUT vorgibt.
+printf '%s %s\n' "systemd-analyze" "$*" >>"${STUB_LOG:-/dev/null}"
+_var="STUB_SYSTEMD_ANALYZE_OUT"
+[[ -n "${!_var:-}" ]] && printf '%s\n' "${!_var}"
+_rc="STUB_SYSTEMD_ANALYZE_RC"
+exit "${!_rc:-0}"

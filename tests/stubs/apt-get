@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Stub für 'apt-get'. Protokolliert den Aufruf und verhält sich so, wie es
+# der Testfall über STUB_<KOMMANDO>_RC / _OUT vorgibt.
+printf '%s %s\n' "apt-get" "$*" >>"${STUB_LOG:-/dev/null}"
+_var="STUB_APT_GET_OUT"
+[[ -n "${!_var:-}" ]] && printf '%s\n' "${!_var}"
+_rc="STUB_APT_GET_RC"
+exit "${!_rc:-0}"

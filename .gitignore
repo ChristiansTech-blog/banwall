@@ -1,0 +1,18 @@
+# Editoren
+*.swp
+*~
+.vscode/
+.idea/
+
+# Testartefakte
+tests/**/*.log
+.bats-tmp/
+
+# Lokale Konfiguration, die nicht ins Repository gehört
+banwall.conf
+*.local
+
+# Versehentlich hier gelandete Backups
+backups/
+*.bak
+*.orig
