@@ -65,7 +65,7 @@ _bl_parse() {
 
 # _bl_filter_safe - entfernt Einträge, die uns selbst treffen würden.
 _bl_filter_safe() {
-	local pattern local_addrs tmp_local
+	local pattern tmp_local
 	pattern="$(printf '%s|' "${_BANWALL_BL_NEVER[@]}")"
 	pattern="${pattern%|}"
 

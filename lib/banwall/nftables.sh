@@ -69,8 +69,8 @@ $(if [[ -n "$allow_nets" ]]; then
 fi)
 		# ICMP wird gebraucht: ohne Path-MTU-Discovery brechen große
 		# Pakete weg, ohne ND funktioniert IPv6 gar nicht.
-		ip protocol icmp icmp type { destination-unreachable, time-exceeded, parameter-problem$(((BANWALL_ALLOW_PING)) && printf ', echo-request')} accept
-		ip6 nexthdr icmpv6 icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert$(((BANWALL_ALLOW_PING)) && printf ', echo-request')} accept
+		ip protocol icmp icmp type { destination-unreachable, time-exceeded, parameter-problem$( ((BANWALL_ALLOW_PING)) && printf ', echo-request')} accept
+		ip6 nexthdr icmpv6 icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem, nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert$( ((BANWALL_ALLOW_PING)) && printf ', echo-request')} accept
 $(if ((BANWALL_SSH_RATE_LIMIT)); then
 		printf '\n\t\t# Neue SSH-Verbindungen begrenzen. Bremst Bruteforce, bevor\n'
 		printf '\t\t# fail2ban überhaupt eine Zeile im Log sieht.\n'

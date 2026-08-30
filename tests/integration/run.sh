@@ -9,6 +9,10 @@
 #
 #   bash tests/integration/run.sh
 
+# $-Ausdrücke in den inside '...'-Blöcken werden absichtlich erst im
+# Container ausgewertet, nicht in diesem Skript.
+# shellcheck disable=SC2016
+
 set -Eeuo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

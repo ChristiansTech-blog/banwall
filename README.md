@@ -19,10 +19,68 @@ ein neuer Server nicht als offene Tür im Netz steht.
 
 ## Installation
 
+Vier Schritte, in dieser Reihenfolge, alle als `root`. Wer als normaler
+Benutzer arbeitet, stellt jedem Befehl `sudo` voran.
+
+### 1. Voraussetzungen nachinstallieren
+
+Auf einer Minimalinstallation — Netinst ohne „Standard-Systemwerkzeuge", die
+meisten vServer-Images — fehlen `git` und `sudo`:
+
+```bash
+apt update
+apt install -y git sudo
+```
+
+`sudo` ist dabei keine Bequemlichkeit, sondern Voraussetzung: Der Aussperr-Schutz
+sucht nach einem Nicht-Root-Benutzer in der Gruppe `sudo`. Ohne das Paket gibt es
+diese Gruppe nicht, und `banwall apply` bricht mit Exit-Code 4 ab.
+
+Alles Weitere — `nftables`, `fail2ban`, `unattended-upgrades` — installiert
+Banwall selbst.
+
+### 2. Admin-Benutzer mit SSH-Schlüssel anlegen
+
+Überspringen, wenn es so einen Benutzer schon gibt. Sonst — `admin` durch den
+gewünschten Namen ersetzen:
+
+```bash
+adduser admin
+usermod -aG sudo admin
+install -d -m 700 -o admin -g admin /home/admin/.ssh
+echo 'ssh-ed25519 AAAA... dein@schluessel' > /home/admin/.ssh/authorized_keys
+chown admin:admin /home/admin/.ssh/authorized_keys
+chmod 600 /home/admin/.ssh/authorized_keys
+```
+
+Den öffentlichen Schlüssel zeigt auf dem **eigenen** Rechner `cat ~/.ssh/id_ed25519.pub`.
+Noch keiner da? `ssh-keygen -t ed25519` legt einen an.
+
+Danach in einem zweiten Terminal nachweisen, dass der Zugang wirklich
+funktioniert — vom eigenen Rechner aus:
+
+```bash
+ssh admin@server.example
+```
+
+Das ist der Schritt, der später das Aussperren verhindert. Erst wenn er klappt,
+geht es weiter.
+
+### 3. Banwall installieren
+
 ```bash
 git clone https://github.com/ChristiansTech-blog/banwall.git
 cd banwall
-sudo ./install.sh
+./install.sh
+```
+
+Ohne `git` geht es auch über das Tar-Archiv:
+
+```bash
+apt install -y curl
+curl -fsSL https://github.com/ChristiansTech-blog/banwall/archive/refs/heads/main.tar.gz | tar xz
+cd banwall-main
+./install.sh
 ```
 
 Danach startet ein Assistent, der durch die Einrichtung führt. Er erkennt
@@ -30,21 +88,24 @@ laufende Dienste, den SSH-Port und vorhandene SSH-Schlüssel, erklärt zu jedem
 Schritt das Risiko und zeigt am Ende eine Zusammenfassung zum Korrigieren.
 
 **Der Assistent verändert nichts** — er schreibt nur `/etc/banwall/banwall.conf`.
-Umgesetzt wird erst danach:
+
+### 4. Anwenden
 
 ```bash
-sudo banwall apply --dry-run    # ansehen, was passieren würde
-sudo banwall apply              # anwenden
+banwall check              # Voraussetzungen prüfen
+banwall apply --dry-run    # ansehen, was passieren würde
+banwall apply              # anwenden
 ```
 
 Dann — **bevor** du die aktuelle Sitzung schließt — in einem neuen Terminal
-anmelden. Klappt das nicht, nimmt `sudo banwall rollback` in der noch offenen
+anmelden. Klappt das nicht, nimmt `banwall rollback` in der noch offenen
 Sitzung alles zurück.
 
 ## Befehle
 
 ```bash
 banwall setup              geführte Einrichtung (auch später jederzeit)
+banwall check              Voraussetzungen prüfen, ohne etwas zu ändern
 banwall apply              Einstellungen umsetzen
 banwall apply --dry-run    zeigen, was passieren würde
 banwall apply -m ssh       nur ein Modul anwenden
@@ -178,8 +239,14 @@ Server aussperrt oder eine Härtung wirkungslos macht.
 
 ## Voraussetzungen
 
-Debian 13 (Trixie) mit systemd, root-Rechte, und ein Nicht-Root-Benutzer mit
-sudo-Rechten und hinterlegtem SSH-Schlüssel.
+- Debian 13 (Trixie) mit systemd
+- root-Rechte
+- die Pakete `git` und `sudo` (Schritt 1 der Installation)
+- ein Nicht-Root-Benutzer mit sudo-Rechten und hinterlegtem SSH-Schlüssel
+  (Schritt 2 der Installation)
+
+Auf einer Minimalinstallation fehlen die letzten beiden Punkte in aller Regel —
+die [Installation](#installation) führt der Reihe nach durch alle.
 
 ## Lizenz
 

@@ -29,9 +29,10 @@ backup_current_dir() { printf '%s' "$_BANWALL_BACKUP_DIR"; }
 # nie aus einem halben Stand restauriert.
 backup_latest_dir() {
 	local d
-	for d in $(ls -1d "$BANWALL_BACKUP_ROOT"/*/ 2>/dev/null | sort -r); do
-		[[ -f "$d/.complete" ]] && { printf '%s' "${d%/}"; return 0; }
-	done
+	while IFS= read -r d; do
+		[[ -f "$d/.complete" ]] && { printf '%s' "$d"; return 0; }
+	done < <(find "$BANWALL_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null |
+		sort -r)
 	return 1
 }
 

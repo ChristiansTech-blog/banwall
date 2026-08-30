@@ -1,0 +1,8 @@
+# shellcheck-Konfiguration
+#
+# Die Module werden über $BANWALL_LIB_DIR gesourct, das erst zur Laufzeit
+# feststeht. Ohne diesen Suchpfad kann shellcheck den source-Direktiven
+# nicht folgen und meldet SC1091 für jedes Modul.
+source-path=SCRIPTDIR
+source-path=SCRIPTDIR/../lib/banwall
+source-path=lib/banwall

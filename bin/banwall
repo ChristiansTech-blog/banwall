@@ -21,6 +21,7 @@ else
 	BANWALL_LIB_DIR="/usr/local/lib/banwall"
 	BANWALL_SHARE_DIR="/usr/local/share/banwall"
 fi
+# shellcheck disable=SC2034  # BANWALL_SHARE_DIR wird in den Modulen gelesen
 readonly BANWALL_VERSION BANWALL_LIB_DIR BANWALL_SHARE_DIR
 
 # shellcheck source=../lib/banwall/common.sh
@@ -97,6 +98,7 @@ parse_args() {
 	BANWALL_CMD=""
 
 	while (($# > 0)); do
+		# shellcheck disable=SC2034  # gelesen in common.sh und den Modulen
 		case "$1" in
 		-n | --dry-run) BANWALL_DRY_RUN=1 ;;
 		-y | --yes) BANWALL_ASSUME_YES=1 ;;

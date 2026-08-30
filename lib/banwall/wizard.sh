@@ -219,9 +219,11 @@ _wiz_systemcheck() {
 		_wiz_schlecht "keine root-Rechte - der Assistent kann nichts speichern"
 	fi
 
-	command -v systemctl >/dev/null 2>&1 &&
-		_wiz_gut "systemd vorhanden" ||
+	if command -v systemctl >/dev/null 2>&1; then
+		_wiz_gut "systemd vorhanden"
+	else
 		_wiz_schlecht "kein systemd gefunden"
+	fi
 
 	# Verbindungsweg: wer lokal an der Konsole sitzt, hat ein anderes
 	# Risiko als jemand, der über genau die Verbindung eingeloggt ist,
@@ -249,7 +251,7 @@ _wiz_systemcheck() {
 
 	# Offene Ports
 	printf '\n  Aktuell erreichbare Dienste:\n'
-	local zeile leer=1
+	local port dienst leer=1
 	while read -r port dienst; do
 		[[ -n "$port" ]] || continue
 		leer=0
@@ -317,6 +319,7 @@ _wiz_schritt_firewall() {
 				"$_C_RED" "$_C_RST"
 			continue
 		fi
+		# shellcheck disable=SC2086  # Wort-Splitting gewollt: ein Argument je Port
 		if ! array_contains "$WIZ_SSH_PORT" $WIZ_TCP_PORTS; then
 			printf '  %sDer SSH-Port %s fehlt. Das würde dich aussperren.%s\n' \
 				"$_C_RED" "$WIZ_SSH_PORT" "$_C_RST"
@@ -623,7 +626,8 @@ _wiz_schreiben() {
 	# Bestehende Konfiguration sichern - jemand könnte sie von Hand
 	# angepasst haben und die Änderung nach dem Lauf vermissen.
 	if [[ -f "$ziel" ]]; then
-		local sicherung="${ziel}.$(date +%Y%m%d-%H%M%S).bak"
+		local sicherung
+		sicherung="${ziel}.$(date +%Y%m%d-%H%M%S).bak"
 		cp -a "$ziel" "$sicherung"
 		printf '\n  Bisherige Konfiguration gesichert: %s\n' "$sicherung"
 	fi

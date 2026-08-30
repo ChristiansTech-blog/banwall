@@ -6,6 +6,10 @@
 # gesourct. Das ist für ein Bash-Tool die schlankste Lösung, bedeutet
 # aber: wer die Datei schreiben darf, führt Code als root aus. Deshalb
 # prüft config_load Eigentümer und Rechte, bevor sie geladen wird.
+#
+# Die Standardwerte weiter unten werden hier nur zugewiesen und in den
+# Modulen gelesen - das ist der Zweck der Datei, keine tote Zuweisung.
+# shellcheck disable=SC2034
 
 [[ -n "${_BANWALL_CONFIG_LOADED:-}" ]] && return 0
 _BANWALL_CONFIG_LOADED=1
@@ -14,6 +18,7 @@ _BANWALL_CONFIG_LOADED=1
 : "${BANWALL_CONFIG_DIR:=/etc/banwall}"
 
 # --- Standardwerte -----------------------------------------------------
+#
 # Bewusst konservativ: Ohne Konfigurationsdatei macht Banwall nur das,
 # was auf jedem Server richtig ist, und lässt SSH offen.
 
@@ -131,8 +136,9 @@ config_module_enabled() {
 _config_check_ports() {
 	local varname="$1" port
 	for port in ${!varname}; do
-		[[ "$port" =~ ^[0-9]+$ ]] && ((port >= 1 && port <= 65535)) ||
+		if [[ ! "$port" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
 			die 3 "$varname enthält einen ungültigen Port: '$port' (erlaubt: 1-65535)."
+		fi
 	done
 }
 
@@ -157,6 +163,7 @@ config_validate() {
 	# Der SSH-Port muss in der Firewall offen sein, sonst sperrt sich der
 	# Admin beim nächsten Login aus.
 	if ((BANWALL_ENABLE_NFTABLES)) && ((BANWALL_ENABLE_SSH)); then
+		# shellcheck disable=SC2086  # Wort-Splitting gewollt: ein Argument je Port
 		array_contains "$BANWALL_SSH_PORT" $BANWALL_TCP_PORTS ||
 			die 3 "SSH-Port $BANWALL_SSH_PORT fehlt in BANWALL_TCP_PORTS ('$BANWALL_TCP_PORTS'). Das würde dich aussperren."
 	fi
