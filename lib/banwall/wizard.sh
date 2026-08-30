@@ -256,9 +256,14 @@ _wiz_systemcheck() {
 	# Verbindungsweg: wer lokal an der Konsole sitzt, hat ein anderes
 	# Risiko als jemand, der über genau die Verbindung eingeloggt ist,
 	# die Banwall gleich anfasst.
-	if [[ -n "${SSH_CONNECTION:-}" ]]; then
+	local ssh_peer=""
+	ssh_peer="$(banwall_ssh_peer || true)"
+	if [[ -n "$ssh_peer" ]]; then
 		WIZ_UEBER_SSH=1
-		_wiz_neutral "verbunden über SSH von $(awk '{print $1}' <<<"$SSH_CONNECTION")"
+		_wiz_neutral "verbunden über SSH von $ssh_peer"
+	elif banwall_is_ssh_session; then
+		WIZ_UEBER_SSH=1
+		_wiz_neutral "verbunden über SSH (Adresse der Gegenstelle nicht ermittelbar)"
 	else
 		WIZ_UEBER_SSH=0
 		_wiz_neutral "lokale Sitzung (keine SSH-Verbindung erkannt)"
@@ -847,7 +852,7 @@ _wiz_willkommen() {
 
 Einzige Ausnahme: Fehlt ein Admin-Benutzer mit SSH-Key, bietet der Assistent gleich an, einen anzulegen."
 
-	if [[ -n "${SSH_CONNECTION:-}" ]]; then
+	if banwall_is_ssh_session; then
 		_wiz_warnung "Du arbeitest über SSH. Öffne jetzt ein zweites Terminal zu diesem Server und lass es offen - das ist deine Rückfahrkarte, falls der Zugang wegbricht."
 	fi
 

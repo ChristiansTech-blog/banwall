@@ -187,3 +187,90 @@ preflight_checks() {
 	require_cmd systemctl "Banwall setzt systemd voraus."
 	require_cmd apt-get "Banwall setzt ein Debian-Paketsystem voraus."
 }
+
+# ------------------------------------------------------- Sitzungserkennung
+#
+# Ob wir über SSH arbeiten, entscheidet über die Warnung vor dem Aussperren
+# und darüber, welche Adresse nie in einer Blocklist landen darf.
+#
+# SSH_CONNECTION allein reicht dafür nicht: sudo setzt env_reset, und die
+# SSH-Variablen stehen auf Debian nicht in env_keep. Da Banwall root
+# braucht und deshalb fast immer unter sudo läuft, wäre die Umgebung im
+# Regelfall leer - der Assistent hielte eine SSH-Sitzung für eine lokale
+# Konsole. Deshalb zwei weitere Wege, die ein sudo überstehen.
+
+# _banwall_sshd_ancestor - PID des sshd in der eigenen Prozesskette.
+_banwall_sshd_ancestor() {
+	local pid="$$" name tiefe=0
+
+	while [[ -r "/proc/$pid/comm" ]]; do
+		((tiefe++ > 20)) && break
+		name="$(<"/proc/$pid/comm")"
+		# Ab OpenSSH 9.8 heißt der Sitzungsprozess 'sshd-session'.
+		if [[ "$name" == "sshd" || "$name" == "sshd-session" ]]; then
+			printf '%s\n' "$pid"
+			return 0
+		fi
+		# PPid aus status statt aus stat: in stat steckt der Prozessname
+		# im Feld 2 und darf Leerzeichen enthalten, was jede Feldzählung
+		# verschiebt.
+		pid="$(awk '/^PPid:/{print $2}' "/proc/$pid/status" 2>/dev/null)"
+		[[ -n "$pid" && "$pid" != "0" ]] || break
+	done
+	return 1
+}
+
+# _banwall_session_id - ID der eigenen systemd-Sitzung.
+_banwall_session_id() {
+	if [[ -n "${XDG_SESSION_ID:-}" ]]; then
+		printf '%s\n' "$XDG_SESSION_ID"
+		return 0
+	fi
+	# Der cgroup-Pfad überlebt sudo, die Umgebungsvariable nicht.
+	sed -n 's|.*/session-\([0-9]\{1,\}\)\.scope.*|\1|p' /proc/self/cgroup 2>/dev/null |
+		head -n 1 | grep . || return 1
+}
+
+# banwall_ssh_peer - Adresse der Gegenstelle der eigenen Sitzung.
+# Leer und Rückgabewert 1, wenn keine ermittelbar ist.
+banwall_ssh_peer() {
+	local peer sid pid
+
+	[[ -n "${SSH_CONNECTION:-}" ]] && { awk '{print $1}' <<<"$SSH_CONNECTION"; return 0; }
+	[[ -n "${SSH_CLIENT:-}" ]] && { awk '{print $1}' <<<"$SSH_CLIENT"; return 0; }
+
+	# Weg 2: die systemd-Sitzung kennt die Gegenstelle unabhängig von der
+	# Umgebung.
+	if command -v loginctl >/dev/null 2>&1 && sid="$(_banwall_session_id)"; then
+		peer="$(loginctl show-session "$sid" --property=RemoteHost --value 2>/dev/null)"
+		[[ -n "$peer" && "$peer" != "null" ]] && { printf '%s\n' "$peer"; return 0; }
+	fi
+
+	# Weg 3: den sshd der eigenen Kette suchen und ss nach dessen
+	# Gegenstelle fragen.
+	if pid="$(_banwall_sshd_ancestor)" && command -v ss >/dev/null 2>&1; then
+		peer="$(ss -H -tnp 2>/dev/null |
+			awk -v muster="pid=$pid," '$0 ~ muster {print $5; exit}')"
+		# "203.0.113.7:54321" bzw. "[2001:db8::1]:54321" auf die Adresse kürzen.
+		peer="${peer%:*}"
+		peer="${peer#[}"
+		peer="${peer%]}"
+		[[ -n "$peer" ]] && { printf '%s\n' "$peer"; return 0; }
+	fi
+
+	return 1
+}
+
+# banwall_is_ssh_session - arbeiten wir über SSH? Auch dann wahr, wenn die
+# Adresse der Gegenstelle nicht zu ermitteln war.
+banwall_is_ssh_session() {
+	[[ -n "${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}" ]] && return 0
+
+	local sid
+	if command -v loginctl >/dev/null 2>&1 && sid="$(_banwall_session_id)"; then
+		[[ "$(loginctl show-session "$sid" --property=Remote --value 2>/dev/null)" == "yes" ]] &&
+			return 0
+	fi
+
+	_banwall_sshd_ancestor >/dev/null
+}

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Stub für 'loginctl'. Protokolliert den Aufruf und verhält sich so, wie es
+# der Testfall über STUB_<KOMMANDO>_RC / _OUT vorgibt.
+printf '%s %s\n' "loginctl" "$*" >>"${STUB_LOG:-/dev/null}"
+_var="STUB_LOGINCTL_OUT"
+[[ -n "${!_var:-}" ]] && printf '%s\n' "${!_var}"
+_rc="STUB_LOGINCTL_RC"
+exit "${!_rc:-0}"

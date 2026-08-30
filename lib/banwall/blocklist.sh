@@ -40,8 +40,10 @@ readonly _BANWALL_BL_NEVER=(
 # der aktuellen SSH-Sitzung. Genau die dürfen nie in einem Set landen.
 _bl_local_addresses() {
 	ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1
-	[[ -n "${SSH_CLIENT:-}" ]] && awk '{print $1}' <<<"$SSH_CLIENT"
-	[[ -n "${SSH_CONNECTION:-}" ]] && awk '{print $1}' <<<"$SSH_CONNECTION"
+	# banwall_ssh_peer statt SSH_CLIENT direkt: unter sudo ist die
+	# Umgebung leer, und dann stünde ausgerechnet die eigene
+	# Gegenstelle nicht unter Schutz.
+	banwall_ssh_peer || true
 	return 0
 }
 
